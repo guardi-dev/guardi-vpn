@@ -1,6 +1,17 @@
 [package]
 name = "guardi-vpn"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [dependencies]
+# The asynchronous runtime needed for main.rs and proxy.rs
+tokio = { version = "1.49", features = ["full"] }
+
+# Required for network/ping.rs and tunnel/proxy.rs
+libp2p = "0.53"
+
+# Future use for interceptor/sniffer.rs
+# windivert = "0.3" 
+
+# Error handling
+anyhow = "1.0"
