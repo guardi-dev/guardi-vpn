@@ -2,52 +2,54 @@ pub mod network;
 pub mod interceptor;
 pub mod tunnel;
 
-// TYPES from ACM.md
+// Типы из твоего блока TYPES
 pub type PeerId = String;
 pub type Latency = u32;
 pub type Hostname = String;
 pub type RouteScore = u32;
 pub type Packet = Vec<u8>;
-pub type PeerList = Vec<PeerId>;
 
-use tokio::task;
 use tokio::sync::mpsc;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Guardi-VPN initialized.");
+    println!("Guardi-VPN: Система запущена.");
 
-    // Create a pipe for Packets: Capacity 100 to prevent memory overflow
+    // Создаем канал для передачи пакетов от снайфера к обработчику
     let (tx, mut rx) = mpsc::channel::<Packet>(100);
 
-    // L: Task 1 - Intercept (The loop you see in your console)
-    task::spawn(async move {
+    // Ветка перехвата (Interceptor)
+    tokio::spawn(async move {
         loop {
+            // Имитируем захват пакета
             if let Ok(packet) = interceptor::sniffer::capture_packet(3000) {
                 let _ = tx.send(packet).await;
             }
-            // Small sleep just to prevent CPU melting during mock testing
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            // Пауза, чтобы не заспамить консоль
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
     });
 
-    // L: Task 2 - Process & Tunnel (The "Brain")
-    task::spawn(async move {
+    // Ветка обработки и туннелирования
+    tokio::spawn(async move {
         while let Some(packet) = rx.recv().await {
-            // 1. Extract Hostname
+            // 1. Парсим пакет, достаем хост
             if let Some(host) = interceptor::parser::extract_hostname(packet) {
-                println!("Logic: Captured request for domain: {}", host);
+                println!(">>> Перехвачен запрос к: {}", host);
 
-                // 2. Mocking the Network logic (Ping -> Score -> Select)
-                let selected_peer = "node-alpha-5".to_string();
-                
-                println!("Action: Routing {} through peer {}", host, selected_peer);
+                // 2. Логика сети: расчет лучшего узла (имитация)
+                let score = network::score::calculate(50, 20);
+                println!("--- Рассчитанный вес маршрута: {}", score);
+
+                let best_peer = "germany-node-01".to_string();
+                println!("=== Направляем трафик через: {}", best_peer);
             }
         }
     });
 
-    // Wait for Ctrl+C to shut down
+    // Ждем прерывания (Ctrl+C)
     tokio::signal::ctrl_c().await?;
-    println!("\nGuardi-VPN gracefully stopped.");
+    println!("Guardi-VPN: Завершение работы.");
     Ok(())
 }
