@@ -1,26 +1,23 @@
-use crate::Packet;
-// Hypothetical wrapper for the WinDivert rust binding
-// use windivert::{WinDivert, WinDivertFlags, WinDivertLayer};
+use pcap::Capture;
 
-/// L: capture inbound packet from port via driver
-pub fn capture_packet(port: u16) -> Result<Packet, String> {
-    // Define filter string for the driver: e.g., "tcp.DstPort == 3000"
-    let filter = format!("tcp.DstPort == {}", port);
-    
-    /* Logic breakdown:
-    1. Open driver handle with the filter
-    2. Receive raw bytes from the network stack
-    3. Return as the Packet type ([]u8)
-    */
+pub fn sniffer(port: u32) -> Vec<u8> {
+    // 1. Открываем eth0 напрямую (в Docker это стандарт)
+    // Мы используем .open(), чтобы начать слушать
+    let mut cap = match Capture::from_device("eth0") {
+        Ok(c) => c.immediate_mode(true).timeout(100).open().unwrap(),
+        Err(_) => return vec![], // Если eth0 нет, возвращаем пустоту
+    };
 
-    // Placeholder for actual driver interaction:
-    // let handle = WinDivert::open(&filter, WinDivertLayer::Network, 0, WinDivertFlags::None)?;
-    // let raw_data = handle.recv(); 
+    // 2. Устанавливаем фильтр, чтобы не ловить всё подряд
+    let filter = format!("tcp port {}", port);
+    cap.filter(&filter, true).ok();
 
-    // println!("Sniffer: Listening for traffic on port {}", port);
-    
-    // Mocking a captured packet for the flow
-    let mock_packet: Packet = vec![0x45, 0x00, 0x00, 0x28, 0x00, 0x01]; 
-    
-    Ok(mock_packet)
+    // 3. Пытаемся захватить РЕАЛЬНЫЙ пакет
+    match cap.next_packet() {
+        Ok(packet) => {
+            // packet.data — это и есть те байты, которые видел tcpdump
+            packet.data.to_vec()
+        }
+        Err(_) => vec![], // Если пакетов нет, возвращаем пустой вектор
+    }
 }

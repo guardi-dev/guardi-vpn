@@ -51,20 +51,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             // Пытаемся захватить пакет. 
             // sniffer возвращает Result<Packet, String>
-            match interceptor::sniffer(443) {
-                Ok(pkt) => {
-                    let target = interceptor::parser(pkt);
-                    // Если Hostname это String, это сработает. 
-                    // Если это кастомный тип, используем target.to_string()
-                    let str = target.unwrap_or_default();
-                    if str.len() > 0 {
-                        println!("🔍 Перехвачен запрос к: {}", str);
-                    }
-                }
-                Err(e) => eprintln!("⚠️ Ошибка сниффера: {}", e),
+            let data = interceptor::sniffer(443);
+            if data.len() > 0 {
+                println!("🔍 Перехвачен запрос к: {}", data.len());
             }
             
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     });
 

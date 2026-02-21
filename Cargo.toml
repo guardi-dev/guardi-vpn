@@ -16,3 +16,4 @@ libp2p = "0.53"
 # Error handling
 anyhow = "1.0"
 mpsc = "0.2.6"
+pcap = "2.4.0"
