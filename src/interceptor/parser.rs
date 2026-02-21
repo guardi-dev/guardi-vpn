@@ -3,17 +3,23 @@ use crate::{Packet, Hostname};
 
 /// L: extract domain name from packet header
 pub fn extract_hostname(packet: Packet) -> Hostname {
-    if packet.len() < 34 {
-        return "Invalid".to_string();
+
+    if packet.len() < 40 { return "Control".to_string(); }
+
+    let dst = format!("{}.{}.{}.{}", packet[30], packet[31], packet[32], packet[33]);
+    
+    // Превращаем хвост пакета (полезную нагрузку) в строку, 
+    // игнорируя невалидные символы.
+    let payload = String::from_utf8_lossy(&packet[54..]);
+
+    // Если это TLS Client Hello, там часто можно встретить имя хоста.
+    // Это упрощенный поиск для обучения:
+    if let Some(pos) = payload.find("com") { // Ищем расширения вроде .com, .org, .net
+        // Вырезаем кусок текста вокруг найденного расширения
+        let start = pos.saturating_sub(10);
+        let end = (pos + 3).min(payload.len());
+        return format!("{} (Host: {}...)", dst, &payload[start..end].trim());
     }
 
-    if packet.len() < 34 { return "Small Packet".to_string(); }
-
-    // Пропускаем Ethernet заголовок (14 байт)
-    // Байты 26-29: Source IP
-    let src = format!("{}.{}.{}.{}", packet[26], packet[27], packet[28], packet[29]);
-    // Байты 30-33: Destination IP
-    let dst = format!("{}.{}.{}.{}", packet[30], packet[31], packet[32], packet[33]);
-
-    format!("{} -> {}", src, dst)
+    dst
 }
