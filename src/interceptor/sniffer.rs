@@ -15,8 +15,7 @@ pub fn sniffer(port: u32) -> Vec<u8> {
     // 3. Пытаемся захватить РЕАЛЬНЫЙ пакет
     match cap.next_packet() {
         Ok(packet) => {
-            // packet.data — это и есть те байты, которые видел tcpdump
-            packet.data.to_vec()
+            packet.to_vec()
         }
         Err(_) => vec![], // Если пакетов нет, возвращаем пустой вектор
     }

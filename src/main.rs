@@ -7,6 +7,8 @@ use std::fs;
 use std::sync::Arc;
 use std::collections::HashSet;
 
+use crate::interceptor::parser;
+
 // TYPES (Согласно ACM.txt)
 pub type PeerId = String;
 pub type Latency = u32;
@@ -53,7 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // sniffer возвращает Result<Packet, String>
             let data = interceptor::sniffer(443);
             if data.len() > 0 {
-                println!("🔍 Перехвачен запрос к: {}", data.len());
+                let parsed = parser(data);
+                println!("🔍 Перехвачен запрос к: {}", parsed);
             }
             
             tokio::time::sleep(Duration::from_millis(100)).await;
