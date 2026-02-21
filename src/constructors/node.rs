@@ -221,7 +221,7 @@ impl Node {
     }
 
     /// Отправка сырого пакета конкретному пиру
-    pub fn send_packet(&self, socket: &UdpSocket, peer_id: &str, packet: Vec<u8>) {
+    pub fn send_packet(&self, peer_id: &str, packet: Vec<u8>) {
         if let Some(addr) = self.peer_registry.get(peer_id) {
             // Формат: SECRET:REPLAY_TRAFFIC:[RAW_BYTES]
             // Используем вектор байтов для сборки пакета
@@ -229,7 +229,7 @@ impl Node {
                 .into_bytes();
             payload.extend(packet);
 
-            let _ = socket.send_to(&payload, addr);
+            let _ = self.socket.send_to(&payload, addr);
         }
     }
 
@@ -287,5 +287,15 @@ impl Node {
         let mut msg = format!("{}:{}:", self.secret_key, Topic::ReplayTraffic).into_bytes();
         msg.extend(data);
         let _ = socket.send_to(&msg, to);
+    }
+
+    pub fn get_peer_id_by_host (&self, host: &String) -> Option<&String> {
+        for (peer_id, val) in self.network_availability.iter() {
+            let av = val.get(host).unwrap();
+            if *av {
+                return Some(peer_id);
+            }
+        }
+        return None;
     }
 }
