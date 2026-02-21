@@ -17,6 +17,12 @@ pub type RouteScore = u32;
 pub type Packet = Vec<u8>;
 pub type PeerList = Vec<PeerId>;
 
+fn get_local_ip() -> String {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").expect("Couldn't bind");
+    socket.connect("8.8.8.8:80").expect("Couldn't connect");
+    socket.local_addr().expect("Couldn't get local addr").ip().to_string()
+}
+
 fn get_node_id() -> String {
     // Читаем MAC-адрес интерфейса eth0 (стандарт для Linux/Docker)
     let mac = fs::read_to_string("/sys/class/net/eth0/address")
@@ -32,6 +38,9 @@ fn get_node_id() -> String {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node_name: Arc<String> = Arc::new(get_node_id());
     println!("🚀 Guardi-VPN: [{}] в сети.", node_name);
+
+    let my_ip = get_local_ip();
+    println!("🚀 Мой IP определен как: {}", my_ip);
 
     // 1. Discovery
     let mut peer_rx = network::discovery(node_name.to_string()).await;
@@ -55,8 +64,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // sniffer возвращает Result<Packet, String>
             let data = interceptor::sniffer(443);
             if data.len() > 0 {
-                let parsed = parser(data);
-                println!("🔍 Перехвачен запрос к: {}", parsed);
+                let parsed_ip = parser(data);
+                if parsed_ip == my_ip {
+                    continue;
+                }
+                println!("🔍 Перехвачен запрос к: {}", parsed_ip);
             }
             
             tokio::time::sleep(Duration::from_millis(100)).await;
