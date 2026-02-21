@@ -9,6 +9,9 @@ pub type PeerId = Uuid;
 
 const PROJECT_ID: &str = "GUARDI_VPN";
 
+const STUN_SERVER: &str = "74.125.200.127:19302"; 
+
+
 pub struct Node {
     pub id: PeerId,
     pub local_addr: SocketAddr,
@@ -77,7 +80,6 @@ impl Node {
     }
 
     fn get_stun_endpoint(&self, socket: &UdpSocket) -> Result<SocketAddr, Box<dyn std::error::Error>> {
-        let stun_server = "74.125.200.127:19302"; 
         socket.set_read_timeout(Some(Duration::from_secs(2)))?;
 
         let mut packet = [0u8; 20];
@@ -85,7 +87,7 @@ impl Node {
         BigEndian::write_u32(&mut packet[4..8], 0x2112A442);
         packet[8..20].copy_from_slice(b"STUN-ID-NODE");
 
-        socket.send_to(&packet, stun_server)?;
+        socket.send_to(&packet, STUN_SERVER)?;
         
         let mut buf = [0u8; 512];
         let (len, _) = socket.recv_from(&mut buf)?;
