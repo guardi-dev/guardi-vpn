@@ -93,8 +93,6 @@ impl Node {
                 // Фильтр по секретному ключу
                 if parts.len() < 2 || parts[0] != self.secret_key { continue; }
 
-                println!("Parts: {}", parts.join(", "));
-
                 if let Ok(topic) = Topic::from_str(parts[1]) {
                     match topic {
                         Topic::GossipAlive => {
