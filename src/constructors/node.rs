@@ -8,6 +8,7 @@ use std::thread;
 use uuid::Uuid;
 use strum_macros::{EnumString, Display};
 use std::net::TcpStream;
+use std::sync::Arc;
 
 /// TYPES (из твоей спецификации)
 pub type PeerId = Uuid;
@@ -31,7 +32,9 @@ enum Topic {
     ReplayTraffic,
 }
 
+#[derive(Clone)]
 pub struct Node {
+    pub socket: Arc<UdpSocket>,
     pub id: PeerId,
     pub local_addr: SocketAddr,
     pub public_addr: Option<SocketAddr>,
@@ -46,8 +49,11 @@ pub struct Node {
 impl Node {
     pub fn new(target_hosts: Vec<String>) -> Self {
         let auto_id = Uuid::new_v4();
+        let socket = UdpSocket::bind("0.0.0.0:12345").expect("Couldn't bind");
+        socket.set_nonblocking(false).unwrap();
         // Ключ проекта, чтобы ноды из разных твоих сборок не перемешались
         Self {
+            socket: Arc::new(socket),
             id: auto_id,
             local_addr: "0.0.0.0:4242".parse().unwrap(),
             public_addr: None,
@@ -61,18 +67,17 @@ impl Node {
     /// Основной метод: запускает обнаружение и делает ноду видимой
     pub fn start(&mut self) {
         // 1. Создаем сокет, который будет использоваться и для STUN, и для Discovery
-        let socket = UdpSocket::bind(self.local_addr).expect("Failed to bind socket");
-        socket.set_broadcast(true).expect("Failed to set broadcast");
+        self.socket.set_broadcast(true).expect("Failed to set broadcast");
         
         println!("Node [{}] started on {}", self.id, self.local_addr);
 
         // 2. Получаем внешний IP/Port через STUN (Hole Punching)
-        if let Ok(addr) = self.get_stun_endpoint(&socket) {
+        if let Ok(addr) = self.get_stun_endpoint(&self.socket) {
             self.public_addr = Some(addr);
             println!("Public Identity: {:?}", addr);
         }
 
-        let socket_shared = socket.try_clone().expect("Failed to clone socket");
+        let socket_shared = self.socket.try_clone().expect("Failed to clone socket");
         let id_cloned = self.id.clone();
         let secret_cloned = self.secret_key.clone();
 
@@ -91,7 +96,7 @@ impl Node {
         // Слушаем входящие анонсы от других нод того же проекта
         let mut buf = [0u8; 1024];
         loop {
-            if let Ok((size, src)) = socket.recv_from(&mut buf) {
+            if let Ok((size, src)) = self.socket.recv_from(&mut buf) {
                 let raw_msg = String::from_utf8_lossy(&buf[..size]);
                 let parts: Vec<&str> = raw_msg.split(':').collect();
 
@@ -110,11 +115,11 @@ impl Node {
                                 self.peer_registry.insert(peer_id.clone(), src);
                                 
                                 // СРАЗУ запрашиваем список хостов у этого пира
-                                self.sync_hosts(&socket, &peer_id);
+                                self.sync_hosts(&self.socket, &peer_id);
                             }
                         },
                         Topic::QueryHosts => {
-                            self.handle_host_query(&socket, src, parts[2]);
+                            self.handle_host_query(&self.socket, src, parts[2]);
                         },
                         Topic::HostsReport => {
                             if let Some(peer_id) = self.get_peer_id_by_addr(src) {
@@ -123,7 +128,7 @@ impl Node {
                         },
                         Topic::ReplayTraffic => {
                             let data = parts[2].as_bytes().to_vec(); // Данные копируем, т.к. они из временного буфера
-                            self.handle_replay(&socket, src, &data);
+                            self.handle_replay(&self.socket, src, &data);
                         }
                     }
                 }
