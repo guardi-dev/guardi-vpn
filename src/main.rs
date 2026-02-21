@@ -2,54 +2,56 @@ pub mod network;
 pub mod interceptor;
 pub mod tunnel;
 
-// Типы из твоего блока TYPES
+use std::env;
+use std::time::Duration;
+
+// TYPES (Согласно ACM.txt)
 pub type PeerId = String;
 pub type Latency = u32;
 pub type Hostname = String;
 pub type RouteScore = u32;
 pub type Packet = Vec<u8>;
-
-use tokio::sync::mpsc;
-use std::time::Duration;
+pub type PeerList = Vec<PeerId>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Guardi-VPN: Система запущена.");
+    let node_name = env::var("NODE_NAME").unwrap_or_else(|_| "node_default".into());
+    println!("🚀 Guardi-VPN: [{}] в сети.", node_name);
 
-    // Создаем канал для передачи пакетов от снайфера к обработчику
-    let (tx, mut rx) = mpsc::channel::<Packet>(100);
+    // 1. Discovery
+    let mut peer_rx = network::discovery(node_name.clone()).await;
 
-    // Ветка перехвата (Interceptor)
+    // 2. Network Topology Logic
+    tokio::spawn(async move {
+        while let Some(peer_id) = peer_rx.recv().await {
+            let lat = network::ping(peer_id.clone()).await;
+            let final_score = network::score(lat, 30);
+            println!("📡 Пир: {} | RTT: {}ms | Score: {}", peer_id, lat, final_score);
+        }
+    });
+
+    // 3. Interceptor Logic (С обработкой ошибок Result)
     tokio::spawn(async move {
         loop {
-            // Имитируем захват пакета
-            if let Ok(packet) = interceptor::sniffer::capture_packet(3000) {
-                let _ = tx.send(packet).await;
+            // Пытаемся захватить пакет. 
+            // sniffer возвращает Result<Packet, String>
+            match interceptor::sniffer(443) {
+                Ok(pkt) => {
+                    let target = interceptor::parser(pkt);
+                    // Если Hostname это String, это сработает. 
+                    // Если это кастомный тип, используем target.to_string()
+                    let str = target.unwrap_or_default();
+                    if str.len() > 0 {
+                        println!("🔍 Перехвачен запрос к: {}", str);
+                    }
+                }
+                Err(e) => eprintln!("⚠️ Ошибка сниффера: {}", e),
             }
-            // Пауза, чтобы не заспамить консоль
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            
+            tokio::time::sleep(Duration::from_secs(10)).await;
         }
     });
 
-    // Ветка обработки и туннелирования
-    tokio::spawn(async move {
-        while let Some(packet) = rx.recv().await {
-            // 1. Парсим пакет, достаем хост
-            if let Some(host) = interceptor::parser::extract_hostname(packet) {
-                println!(">>> Перехвачен запрос к: {}", host);
-
-                // 2. Логика сети: расчет лучшего узла (имитация)
-                let score = network::score::calculate(50, 20);
-                println!("--- Рассчитанный вес маршрута: {}", score);
-
-                let best_peer = "germany-node-01".to_string();
-                println!("=== Направляем трафик через: {}", best_peer);
-            }
-        }
-    });
-
-    // Ждем прерывания (Ctrl+C)
     tokio::signal::ctrl_c().await?;
-    println!("Guardi-VPN: Завершение работы.");
     Ok(())
 }

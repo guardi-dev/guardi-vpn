@@ -1,0 +1,28 @@
+services:
+  node_alpha:
+    build: .
+    container_name: vpn_alpha
+    # cap_add и network_mode необходимы для работы sniffer (raw sockets)
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      vpn_net:
+        ipv4_address: 172.20.0.10
+
+  node_beta:
+    build: .
+    container_name: vpn_beta
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      vpn_net:
+        ipv4_address: 172.20.0.11
+
+networks:
+  vpn_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
