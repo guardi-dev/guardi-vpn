@@ -1,11 +1,13 @@
 use std::collections::HashMap;
-use std::net::{UdpSocket, Ipv4Addr, SocketAddr};
+use std::io::{Read, Write};
+use std::net::{UdpSocket, Ipv4Addr, SocketAddr, IpAddr};
 use std::str::FromStr;
 use std::time::{Duration};
 use byteorder::{ByteOrder, BigEndian};
 use std::thread;
 use uuid::Uuid;
 use strum_macros::{EnumString, Display};
+use std::net::TcpStream;
 
 /// TYPES (из твоей спецификации)
 pub type PeerId = Uuid;
@@ -23,7 +25,10 @@ enum Topic {
     QueryHosts,
 
     #[strum(serialize = "HOSTS_REPORT")]
-    HostsReport
+    HostsReport,
+
+    #[strum(serialize = "REPLAY_TRAFFIC")]
+    ReplayTraffic,
 }
 
 pub struct Node {
@@ -115,6 +120,10 @@ impl Node {
                             if let Some(peer_id) = self.get_peer_id_by_addr(src) {
                                 self.handle_host_report(peer_id, parts[2]);
                             }
+                        },
+                        Topic::ReplayTraffic => {
+                            let data = parts[2].as_bytes().to_vec(); // Данные копируем, т.к. они из временного буфера
+                            self.handle_replay(&socket, src, &data);
                         }
                     }
                 }
@@ -204,5 +213,74 @@ impl Node {
 
         println!("[Node {}] Updated availability for peer {}", self.id, peer_id);
         self.network_availability.insert(peer_id, peer_map);
+    }
+
+    /// Отправка сырого пакета конкретному пиру
+    pub fn send_packet(&self, socket: &UdpSocket, peer_id: &str, packet: Vec<u8>) {
+        if let Some(addr) = self.peer_registry.get(peer_id) {
+            // Формат: SECRET:REPLAY_TRAFFIC:[RAW_BYTES]
+            // Используем вектор байтов для сборки пакета
+            let mut payload = format!("{}:{}:", self.secret_key, Topic::ReplayTraffic)
+                .into_bytes();
+            payload.extend(packet);
+
+            let _ = socket.send_to(&payload, addr);
+        }
+    }
+
+    pub fn handle_replay(&self, socket: &UdpSocket, src: SocketAddr, data: &[u8]) {
+        // 1. Валидация размера (Минимум: 4 байта IP + 2 байта Port)
+        if data.len() < 6 { return; }
+
+        // 2. Извлекаем целевой IP и Порт
+        let ip = Ipv4Addr::new(data[0], data[1], data[2], data[3]);
+        let port = u16::from_be_bytes([data[4], data[5]]);
+        let target_addr = SocketAddr::new(IpAddr::V4(ip), port);
+
+        // 3. Фильтр безопасности (только 80 и 443)
+        if port != 80 && port != 443 {
+            println!("[Security] Blocked traffic to port {}", port);
+            return;
+        }
+
+        let payload = &data[6..];
+        println!("[Replay] Forwarding to {}...", target_addr);
+
+        // 4. Выход в интернет через TCP
+        match TcpStream::connect_timeout(&target_addr.into(),Duration::from_secs(5)) {
+            // 1. Тайм-аут не сработал (мы успели за 5 секунд)
+            Ok(mut stream) => {
+                println!("[Replay] Connected to {}. Sending payload...", target_addr);
+
+                // Отправляем данные (асинхронно)
+                if let Err(e) = stream.write_all(payload) {
+                    eprintln!("[Replay] Failed to write to TCP: {}", e);
+                    return;
+                }
+
+                // Читаем ответ от сервера
+                let mut response = Vec::new();
+                // В Tokio вместо read_to_end часто используют чтение в буфер, 
+                // но для простоты прочитаем всё до закрытия сокета сервером:
+                if let Err(e) = stream.read_to_end(&mut response) {
+                    eprintln!("[Replay] Failed to read from TCP: {}", e);
+                }
+
+                // Отправляем собранные байты обратно инициатору через UDP
+                if !response.is_empty() {
+                    self.send_response_back(socket, src, response);
+                }
+            }
+            // 4. Сработал тайм-аут (сервер молчит)
+            Err(_) => {
+                eprintln!("[Replay] Timeout: {} did not respond in 5s", target_addr);
+            }
+        }
+    }
+
+    fn send_response_back(&self, socket: &UdpSocket, to: SocketAddr, data: Vec<u8>) {
+        let mut msg = format!("{}:{}:", self.secret_key, Topic::ReplayTraffic).into_bytes();
+        msg.extend(data);
+        let _ = socket.send_to(&msg, to);
     }
 }
