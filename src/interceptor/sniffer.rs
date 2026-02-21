@@ -17,7 +17,7 @@ pub fn capture_packet(port: u16) -> Result<Packet, String> {
     // let handle = WinDivert::open(&filter, WinDivertLayer::Network, 0, WinDivertFlags::None)?;
     // let raw_data = handle.recv(); 
 
-    println!("Sniffer: Listening for traffic on port {}", port);
+    // println!("Sniffer: Listening for traffic on port {}", port);
     
     // Mocking a captured packet for the flow
     let mock_packet: Packet = vec![0x45, 0x00, 0x00, 0x28, 0x00, 0x01]; 

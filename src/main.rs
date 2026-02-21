@@ -2,8 +2,10 @@ pub mod network;
 pub mod interceptor;
 pub mod tunnel;
 
-use std::env;
 use std::time::Duration;
+use std::fs;
+use std::sync::Arc;
+use std::collections::HashSet;
 
 // TYPES (Согласно ACM.txt)
 pub type PeerId = String;
@@ -13,20 +15,34 @@ pub type RouteScore = u32;
 pub type Packet = Vec<u8>;
 pub type PeerList = Vec<PeerId>;
 
+fn get_node_id() -> String {
+    // Читаем MAC-адрес интерфейса eth0 (стандарт для Linux/Docker)
+    let mac = fs::read_to_string("/sys/class/net/eth0/address")
+        .unwrap_or_else(|_| "000000000000".to_string())
+        .trim()
+        .replace(":", "");
+
+    // Вместо сложного хеширования просто берем часть MAC и добавляем префикс
+    format!("node-{}", &mac[8..]) 
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let node_name = env::var("NODE_NAME").unwrap_or_else(|_| "node_default".into());
+    let node_name: Arc<String> = Arc::new(get_node_id());
     println!("🚀 Guardi-VPN: [{}] в сети.", node_name);
 
     // 1. Discovery
-    let mut peer_rx = network::discovery(node_name.clone()).await;
-
+    let mut peer_rx = network::discovery(node_name.to_string()).await;
+    let mut known_peers: HashSet<String> = HashSet::new(); // Коллекция для уникальных IP
     // 2. Network Topology Logic
     tokio::spawn(async move {
         while let Some(peer_id) = peer_rx.recv().await {
-            let lat = network::ping(peer_id.clone()).await;
-            let final_score = network::score(lat, 30);
-            println!("📡 Пир: {} | RTT: {}ms | Score: {}", peer_id, lat, final_score);
+            if !known_peers.contains(&peer_id) {
+                let lat = network::ping(peer_id.clone()).await;
+                let final_score = network::score(lat, 30);
+                println!("📡 Пир: {} | RTT: {}ms | Score: {}", peer_id, lat, final_score);
+                known_peers.insert(peer_id);
+            }
         }
     });
 

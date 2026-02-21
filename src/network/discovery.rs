@@ -4,6 +4,8 @@ use tokio::sync::mpsc;
 use std::time::Duration;
 use std::net::SocketAddr;
 
+const PREFIX: &str = "IAM_";
+
 pub async fn start(hostname: String) -> mpsc::Receiver<PeerId> {
     // Явный тип PeerId через турбо-рыбу согласно твоим требованиям
     let (tx, rx) = mpsc::channel::<PeerId>(100);
@@ -20,7 +22,7 @@ pub async fn start(hostname: String) -> mpsc::Receiver<PeerId> {
     let beacon_name = hostname.clone();
     tokio::spawn(async move {
         let broadcast_addr: SocketAddr = "255.255.255.255:9999".parse().unwrap();
-        let msg = format!("IAM:{}", beacon_name);
+        let msg = format!("{}{}", PREFIX, beacon_name);
         
         loop {
             let _ = beacon_socket.send_to(msg.as_bytes(), broadcast_addr).await;
@@ -35,7 +37,7 @@ pub async fn start(hostname: String) -> mpsc::Receiver<PeerId> {
         loop {
             if let Ok((len, addr)) = scanner_socket.recv_from(&mut buf).await {
                 let msg = String::from_utf8_lossy(&buf[..len]);
-                if msg.starts_with("IAM:") {
+                if msg.starts_with(PREFIX) && !msg.contains(&hostname) {
                     // Извлекаем IP как PeerId
                     let found_peer = addr.ip().to_string();
                     let _ = tx.send(found_peer).await;
