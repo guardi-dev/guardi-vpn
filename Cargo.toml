@@ -14,6 +14,5 @@ libp2p = "0.53"
 # windivert = "0.3" 
 
 # Error handling
-anyhow = "1.0"
-mpsc = "0.2.6"
-pcap = "2.4.0"
+byteorder = "1.5.0"
+uuid = { version = "1.21.0", features = ["v4"] }
