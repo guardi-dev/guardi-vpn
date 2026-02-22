@@ -9,13 +9,14 @@ use uuid::Uuid;
 use strum_macros::{EnumString, Display};
 use std::net::TcpStream;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 /// TYPES (из твоей спецификации)
 pub type PeerId = Uuid;
 
 const PROJECT_ID: &str = "GUARDI_VPN";
 
-const STUN_SERVER: &str = "74.125.200.127:19302"; 
+const STUN_SERVER: &str = "stun:3478"; // google stun "74.125.200.127:19302"; 
 
 #[derive(Debug, EnumString, Display)]
 enum Topic {
@@ -32,11 +33,9 @@ enum Topic {
     ReplayTraffic,
 }
 
-#[derive(Clone)]
 pub struct Node {
     pub socket: Arc<UdpSocket>,
     pub id: PeerId,
-    pub local_addr: SocketAddr,
     pub public_addr: Option<SocketAddr>,
     pub secret_key: String, // Для идентификации "своих" в сети
     pub target_hosts: Vec<String>, 
@@ -47,47 +46,58 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(target_hosts: Vec<String>) -> Self {
+    pub fn new(target_hosts: Vec<String>) -> Arc<RwLock<Self>> {
         let auto_id = Uuid::new_v4();
-        let socket = UdpSocket::bind("0.0.0.0:12345").expect("Couldn't bind");
+        let socket = UdpSocket::bind("0.0.0.0:4242").expect("Couldn't bind");
         socket.set_nonblocking(false).unwrap();
         // Ключ проекта, чтобы ноды из разных твоих сборок не перемешались
-        Self {
+        Arc::new(RwLock::new(Self {
             socket: Arc::new(socket),
             id: auto_id,
-            local_addr: "0.0.0.0:4242".parse().unwrap(),
             public_addr: None,
             target_hosts,
             network_availability: HashMap::new(),
             peer_registry: HashMap::new(),
             secret_key: PROJECT_ID.to_string(),
-        }
+        }))
     }
 
     /// Основной метод: запускает обнаружение и делает ноду видимой
-    pub fn start(&mut self) {
+    pub fn start(node: &Arc<RwLock<Self>>) {
         // 1. Создаем сокет, который будет использоваться и для STUN, и для Discovery
-        self.socket.set_broadcast(true).expect("Failed to set broadcast");
-        
-        println!("Node [{}] started on {}", self.id, self.local_addr);
+        let (socket, id, secret_key) = {
+            let guard = node.write().unwrap();
+            (
+                guard.socket.clone(),
+                guard.id.clone(),
+                guard.secret_key.clone()
+            )
+        };
+        socket.set_broadcast(true).expect("Failed to set broadcast");
+        println!("Node [{}] started on {}", id, socket.local_addr().unwrap().to_string());
 
         // 2. Получаем внешний IP/Port через STUN (Hole Punching)
-        if let Ok(addr) = self.get_stun_endpoint(&self.socket) {
-            self.public_addr = Some(addr);
-            println!("Public Identity: {:?}", addr);
-        }
-
-        let socket_shared = self.socket.try_clone().expect("Failed to clone socket");
-        let id_cloned = self.id.clone();
-        let secret_cloned = self.secret_key.clone();
+        let public_addr = Some(Node::get_stun_endpoint(&socket).unwrap());
+        println!("Public Identity: {:?}", public_addr);
+        {
+            node.write().unwrap().public_addr = public_addr;
+        };
 
         // 3. Thread: Broadcast Discovery (Gossip)
         // Нода кричит в сеть: "Я тут, мой PeerId такой-то"
+        let socket_cloned = socket.clone();
+        let secret_cloned = secret_key.clone();
         thread::spawn(move || {
-            let broadcast_addr: SocketAddr = "255.255.255.255:4242".parse().unwrap();
             loop {
-                let msg = format!("{}:{}:{}", secret_cloned, Topic::GossipAlive, id_cloned);
-                let _ = socket_shared.send_to(msg.as_bytes(), broadcast_addr);
+                let msg = format!("{}:{}:{}", &secret_cloned, Topic::GossipAlive, &id);
+                let broadcast = "255.255.255.255:4242";
+                match socket_cloned.send_to(msg.as_bytes(), broadcast) {
+                    Err(e) => {
+                        println!("[Error] {}", e);
+                    },
+                    Ok(_) => {
+                    }
+                }
                 thread::sleep(Duration::from_secs(5));
             }
         });
@@ -96,39 +106,38 @@ impl Node {
         // Слушаем входящие анонсы от других нод того же проекта
         let mut buf = [0u8; 1024];
         loop {
-            if let Ok((size, src)) = self.socket.recv_from(&mut buf) {
+            if let Ok((size, src)) = socket.recv_from(&mut buf) {
                 let raw_msg = String::from_utf8_lossy(&buf[..size]);
                 let parts: Vec<&str> = raw_msg.split(':').collect();
 
                 // Фильтр по секретному ключу
-                if parts.len() < 2 || parts[0] != self.secret_key { continue; }
-
+                if parts.len() < 2 || parts[0] != secret_key { continue; }
+                
                 if let Ok(topic) = Topic::from_str(parts[1]) {
                     match topic {
                         Topic::GossipAlive => {
                             let peer_id = parts[2].to_string();
+                            if peer_id == id.to_string() { continue; }
+
                             println!("Peer ID Discovered: {}", peer_id);
-
-                            if peer_id != self.id.to_string() {
-
-                                // Сохраняем адрес пира
-                                self.peer_registry.insert(peer_id.clone(), src);
-                                
-                                // СРАЗУ запрашиваем список хостов у этого пира
-                                self.sync_hosts(&self.socket, &peer_id);
-                            }
+                            // Сохраняем адрес пира
+                            {
+                                node.write().unwrap().peer_registry.insert(peer_id.clone(), src.clone());
+                            };
+                            // СРАЗУ запрашиваем список хостов у этого пира
+                            Node::sync_hosts(&node, &socket, &peer_id);
                         },
                         Topic::QueryHosts => {
-                            self.handle_host_query(&self.socket, src, parts[2]);
+                            Node::handle_host_query(&node, &socket, src, parts[2]);
                         },
                         Topic::HostsReport => {
-                            if let Some(peer_id) = self.get_peer_id_by_addr(src) {
-                                self.handle_host_report(peer_id, parts[2]);
-                            }
+                            let peer_id = Node::get_peer_id_by_addr(&node, src).unwrap();
+                            if peer_id == id.to_string() { continue; }
+                            Node::handle_host_report(&node, peer_id, parts[2]);
                         },
                         Topic::ReplayTraffic => {
                             let data = parts[2].as_bytes().to_vec(); // Данные копируем, т.к. они из временного буфера
-                            self.handle_replay(&self.socket, src, &data);
+                            Node::handle_replay(&node, &socket, src, &data);
                         }
                     }
                 }
@@ -136,14 +145,14 @@ impl Node {
         }
     }
 
-    fn get_peer_id_by_addr(&self, addr: SocketAddr) -> Option<String> {
-        self.peer_registry
+    fn get_peer_id_by_addr(node: &Arc<RwLock<Self>>, addr: SocketAddr) -> Option<String> {
+        node.write().unwrap().peer_registry
             .iter()
             .find(|&(_, &val)| val == addr)
             .map(|(key, _)| key.clone())
     }
 
-    fn get_stun_endpoint(&self, socket: &UdpSocket) -> Result<SocketAddr, Box<dyn std::error::Error>> {
+    fn get_stun_endpoint(socket: &Arc<UdpSocket>) -> Result<SocketAddr, Box<dyn std::error::Error>> {
         socket.set_read_timeout(Some(Duration::from_secs(2)))?;
 
         let mut packet = [0u8; 20];
@@ -174,20 +183,33 @@ impl Node {
     }
 
     /// 1. Отправка списка хостов пиру (вызывается сразу после Discovery)
-    pub fn sync_hosts(&self, socket: &UdpSocket, peer_id: &str) {
-        if let Some(addr) = self.peer_registry.get(peer_id) {
-            let hosts_str = self.target_hosts.join(",");
+    pub fn sync_hosts(node: &Arc<RwLock<Node>>, socket: &UdpSocket, peer_id: &str) {
+        let (peer_registry, target_hosts, secret_key, id) = {
+            let guard = node.write().unwrap();
+            (
+                guard.peer_registry.clone(), 
+                guard.target_hosts.clone(),
+                guard.secret_key.clone(),
+                guard.id.clone()
+            )
+        };
+        if let Some(addr) = peer_registry.get(peer_id) {
+            let hosts_str = target_hosts.join(",");
             // Протокол: SECRET:QUERY_HOSTS:host1,host2,host3
-            let payload = format!("{}:{}:{}", self.secret_key, Topic::QueryHosts, hosts_str);
+            let payload = format!("{}:{}:{}", secret_key, Topic::QueryHosts, hosts_str);
             
             let _ = socket.send_to(payload.as_bytes(), addr);
-            println!("[Node {}] Sent host query to {}", self.id, peer_id);
+            println!("[Node {}] Sent host query to {}", id, peer_id);
         }
     }
 
     /// 2. Обработка входящего запроса (вызывается в основном loop)
     /// Принимает список от другого пира, проверяет их и шлет ответ
-    pub fn handle_host_query(&self, socket: &UdpSocket, src: SocketAddr, hosts_raw: &str) {
+    pub fn handle_host_query(node: &Arc<RwLock<Self>>, socket: &UdpSocket, src: SocketAddr, hosts_raw: &str) {
+        let secret_key = {
+            let guard = node.write().unwrap();
+            guard.secret_key.clone()
+        };
         let requested_hosts: Vec<&str> = hosts_raw.split(',').collect();
         let mut results = Vec::new();
 
@@ -195,29 +217,33 @@ impl Node {
             // Здесь будет логика проверки (например, ping или проверка таблицы маршрутов)
             // Пока имитируем, что мы можем всё (true)
             let is_available = true; 
-            results.push(format!("{}:{}", host, is_available));
+            results.push(format!("{}|{}", host, is_available));
         }
 
         // Протокол: SECRET:HOSTS_REPORT:host1:true,host2:false
-        let response_payload = format!("{}:{}:{}", self.secret_key, Topic::HostsReport, results.join(","));
+        let response_payload = format!("{}:{}:{}", secret_key, Topic::HostsReport, results.join(","));
         let _ = socket.send_to(response_payload.as_bytes(), src);
     }
 
     /// 3. Обработка отчета (сохранение результата в память ноды)
-    pub fn handle_host_report(&mut self, peer_id: String, report_raw: &str) {
+    pub fn handle_host_report(node: &Arc<RwLock<Self>>, peer_id: String, report_raw: &str) {
         let mut peer_map = HashMap::new();
-        
+
         for entry in report_raw.split(',') {
-            let parts: Vec<&str> = entry.split(':').collect();
+            let parts: Vec<&str> = entry.split('|').collect();
             if parts.len() == 2 {
                 let host = parts[0].to_string();
                 let available = parts[1] == "true";
                 peer_map.insert(host, available);
             }
         }
-
-        println!("[Node {}] Updated availability for peer {}", self.id, peer_id);
-        self.network_availability.insert(peer_id, peer_map);
+        let id = {
+            node.write().unwrap().id.clone()
+        };
+        println!("[Node {}] Updated availability for peer {}", id, peer_id);
+        {
+            node.write().unwrap().network_availability.insert(peer_id, peer_map);
+        }
     }
 
     /// Отправка сырого пакета конкретному пиру
@@ -233,7 +259,10 @@ impl Node {
         }
     }
 
-    pub fn handle_replay(&self, socket: &UdpSocket, src: SocketAddr, data: &[u8]) {
+    pub fn handle_replay(node: &Arc<RwLock<Self>>, socket: &UdpSocket, src: SocketAddr, data: &[u8]) {
+        let secret_key = {
+            node.write().unwrap().secret_key.clone()
+        };
         // 1. Валидация размера (Минимум: 4 байта IP + 2 байта Port)
         if data.len() < 6 { return; }
 
@@ -273,7 +302,7 @@ impl Node {
 
                 // Отправляем собранные байты обратно инициатору через UDP
                 if !response.is_empty() {
-                    self.send_response_back(socket, src, response);
+                    Node::send_response_back(&secret_key, socket, src, response);
                 }
             }
             // 4. Сработал тайм-аут (сервер молчит)
@@ -283,15 +312,15 @@ impl Node {
         }
     }
 
-    fn send_response_back(&self, socket: &UdpSocket, to: SocketAddr, data: Vec<u8>) {
-        let mut msg = format!("{}:{}:", self.secret_key, Topic::ReplayTraffic).into_bytes();
+    fn send_response_back(secret_key: &String, socket: &UdpSocket, to: SocketAddr, data: Vec<u8>) {
+        let mut msg = format!("{}:{}:", secret_key, Topic::ReplayTraffic).into_bytes();
         msg.extend(data);
         let _ = socket.send_to(&msg, to);
     }
 
     pub fn get_peer_id_by_host (&self, host: &String) -> Option<&String> {
         for (peer_id, val) in self.network_availability.iter() {
-            let av = val.get(host).unwrap();
+            let av = val.get(host).unwrap_or(&false);
             if *av {
                 return Some(peer_id);
             }

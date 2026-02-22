@@ -1,19 +1,41 @@
 services:
+  stun:
+    image: coturn/coturn:latest
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    # Флаги для работы без паролей и логов в консоль
+    command: 
+      - "--log-file=stdout"      # Чтобы ты видел в логах, долетают пакеты или нет
+    networks:
+      vpn_net:
+        ipv4_address: 172.20.0.9
+
   vpn_alpha:
+    restart: always
+    depends_on:
+      - stun
     build: .
     # cap_add и network_mode необходимы для работы sniffer (raw sockets)
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
     networks:
       vpn_net:
         ipv4_address: 172.20.0.10
 
   vpn_beta:
+    restart: always
+    depends_on:
+      - stun
     build: .
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
     networks:
       vpn_net:
         ipv4_address: 172.20.0.11
