@@ -17,11 +17,6 @@ services:
       - stun
     build: .
     # cap_add и network_mode необходимы для работы sniffer (raw sockets)
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    devices:
-      - "/dev/net/tun:/dev/net/tun"
     networks:
       vpn_net:
         ipv4_address: 172.20.0.10
@@ -31,11 +26,6 @@ services:
     depends_on:
       - stun
     build: .
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    devices:
-      - "/dev/net/tun:/dev/net/tun"
     networks:
       vpn_net:
         ipv4_address: 172.20.0.11

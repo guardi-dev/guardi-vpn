@@ -4,20 +4,19 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-# The asynchronous runtime needed for main.rs and proxy.rs
-tokio = { version = "1.49", features = ["full"] }
-
-# Required for network/ping.rs and tunnel/proxy.rs
-libp2p = "0.53"
+anyhow = "1.0.102"
+clap = { version = "4.5.60", features = ["derive"] }
+clearscreen = "4.0.5"
+command = "0.0.0"
+either = "1.15.0"
+env_logger = "0.11.9"
+futures = "0.3.32"
+futures-timer = "3.0.3"
+libp2p = { version = "0.53", features = ["full"] }
+tokio = { version = "1.49.0", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 # Future use for interceptor/sniffer.rs
 # windivert = "0.3" 
 
-# Error handling
-byteorder = "1.5.0"
-uuid = { version = "1.21.0", features = ["v4"] }
-strum = { version = "0.26", features = ["derive"] }
-strum_macros = "0.27.2"
-tun = "0.8.5"
-dns-lookup = "3.0.1"
-net-route = "0.4.6"
