@@ -91,9 +91,9 @@ impl Sniffer {
             .up();
         let mut dev = tun::create(&config).expect("Failed to create TUN");
         let mut buf = [0; 4096];
+        let self_clone = self.clone();
 
         println!("[SNIFFER] Запущен. Слушаю TUN...");
-        
         loop {
             let n = dev.read(&mut buf).unwrap();
     
@@ -110,15 +110,16 @@ impl Sniffer {
 
             let dest_ip = format!("{}.{}.{}.{}", buf[16], buf[17], buf[18], buf[19]);
             let packet = buf[0..n].to_vec();
-            self.clone().send_packet(dest_ip, packet);
+            println!("Send packet to {} Packet Len {}", dest_ip, packet.len());
+            Sniffer::send_packet(&self_clone, &dest_ip, packet);
         }
     }
 
-    fn send_packet (self: Arc<Self>, dest_ip: String, packet: Vec<u8>) {
-        let ip_to_peer_id = self.ip_to_peer_id.read().unwrap();
-        let peer_id = ip_to_peer_id.get(&dest_ip);
+    fn send_packet (sniffer: &Arc<Self>, dest_ip: &String, packet: Vec<u8>) {
+        let ip_to_peer_id = sniffer.ip_to_peer_id.read().unwrap();
+        let peer_id = ip_to_peer_id.get(dest_ip);
         if let Some(peer_id) = peer_id {
-            self.node.write().unwrap().send_packet(peer_id, packet);
+            sniffer.node.write().unwrap().send_packet(peer_id, packet);
         }
     }
 }
