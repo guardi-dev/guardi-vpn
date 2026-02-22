@@ -4,8 +4,11 @@ use std::thread;
 use std::time::Duration;
 use std::process::Command;
 use dns_lookup::lookup_host;
+use tun::AbstractDevice;
 use std::io::Read;
-
+use std::net::IpAddr;
+use net_route::Handle;
+use net_route::Route;
 use crate::constructors::node::Node;
 
 pub struct Sniffer {
@@ -90,6 +93,13 @@ impl Sniffer {
             .netmask("255.255.255.255") // МАСКА /32 — это КЛЮЧЕВОЙ момент
             .up();
         let mut dev = tun::create(&config).expect("Failed to create TUN");
+
+        let tun_index: u32 = dev.tun_index().unwrap().try_into().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(
+            Sniffer::setup_routing("142.250.0.0".parse().unwrap(), tun_index)
+        );
+
         let mut buf = [0; 4096];
         let self_clone = self.clone();
 
@@ -121,5 +131,12 @@ impl Sniffer {
         if let Some(peer_id) = peer_id {
             sniffer.node.write().unwrap().send_packet(peer_id, packet);
         }
+    }
+
+    async fn setup_routing(target_ip: IpAddr, tun_index: u32) {
+        let handle = Handle::new().unwrap();
+        let route = Route::new(target_ip, 24) // Маска /24
+            .with_ifindex(tun_index);         // Шлем в наш TUN
+        handle.add(&route).await.unwrap();
     }
 }
