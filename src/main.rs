@@ -113,6 +113,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 retry_interval: Duration::from_secs(10),
                 refresh_interval: Duration::from_secs(30),
                 boot_delay: Duration::from_secs(5),
+                use_connected: true,
                 ..Default::default()
             };
 
@@ -156,8 +157,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let peer_id_str = addr_arr.last().unwrap();
         let peer_id = PeerId::from_str(&peer_id_str).unwrap();
 
-        swarm.behaviour_mut().kademilia.add_address(&peer_id, addr);
-        swarm.dial(Multiaddr::from_str(&addr_str).unwrap()).ok(); // Сразу звоним им всем
+        swarm.behaviour_mut().kademilia.add_address(&peer_id, addr.clone());
+        // swarm.dial(Multiaddr::from_str(&addr_str).unwrap()).ok(); // Сразу звоним им всем
     }
 
 
@@ -239,6 +240,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::ConnectionClosed { peer_id, .. } => {
                     for relay in relays.clone() {
                         if relay.contains(&peer_id.to_string()) {
+                            swarm.dial(Multiaddr::from_str(&relay).unwrap()).unwrap();
                             println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
                         }
                     }
@@ -347,7 +349,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("💬 В сети (Gossipsub)      : {}", gossip_peers);
                 println!("💬 В комнате (guardi-vpn)  : {}", room_peers);
                 println!("--------------------------");
-                println!("{:?}", swarm.external_addresses().collect::<Vec<_>>());
+                for ex in swarm.external_addresses() {
+                    println!("📡 Active Relay {ex}");
+                }
             }
         }
     }
