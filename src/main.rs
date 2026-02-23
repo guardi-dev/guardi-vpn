@@ -92,7 +92,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let mdns =
                 mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
 
-            let ping = ping::Behaviour::new(ping::Config::new());
+            let ping_config = ping::Config::new()
+                .with_interval(std::time::Duration::from_secs(15)) // Пингуем каждые 15 сек
+                .with_timeout(std::time::Duration::from_secs(20));
+            let ping = ping::Behaviour::new(ping_config);
             
             let identify_config = identify::Config::new(
                 "/ipfs/id/1.0.0".to_string(),
@@ -180,7 +183,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let target = relay_addr.clone()
         .with(Protocol::P2p(relay_peer_id))
         .with(Protocol::P2pCircuit);
-    swarm.dial(relay_addr.clone()).unwrap();
+
+    // swarm.dial(relay_peer_id).unwrap();
+    swarm.dial(relay_addr.clone() ).unwrap();
 
     // === LISTENERS ===
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
@@ -208,12 +213,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::IncomingConnection { .. } => {
                     println!("📥 Входящее соединение...");
                 }
-                SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                    println!("🤝 Соединение установлено с {:?}. Адрес: {:?}", peer_id, endpoint.get_remote_address());
-                }
+                // SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                    // println!("🤝 Соединение установлено с {:?}. Адрес: {:?}", peer_id, endpoint.get_remote_address());
+                // }
                 // SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                     // println!("❌ Ошибка исходящего к {:?}: {:?}", peer_id, error);
                 // }
+                SwarmEvent::ConnectionClosed { peer_id, .. } if peer_id == relay_peer_id => {
+                    println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
+                    // swarm.dial(relay_addr.clone()).unwrap();
+                    // Тут можно запустить таймер или просто вызвать dial/listen_on снова
+                }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Relay(e)) => {
                     println!("🚩 СОБЫТИЕ РЕЛЕ: {:?}", e); // Если тут пусто, значит запрос не дошел
                 },
