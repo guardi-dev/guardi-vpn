@@ -231,6 +231,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::ConnectionClosed { peer_id, .. } if peer_id == relay_peer_id => {
                     println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
                     relay_disconnect_time = time::SystemTime::now();
+                    relay_is_connected = false;
                 }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, _multiaddr) in list {
@@ -245,6 +246,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 },
                 SwarmEvent::Behaviour(MyBehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted { .. })) => {
+                    println!("📡 Реле подключилось");
                     relay_is_connected = true;
                 }
                 // Если всё рухнуло — разрешаем переподключение
