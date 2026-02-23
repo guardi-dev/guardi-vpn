@@ -26,7 +26,7 @@ use std::{
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
+    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, upnp, yamux
 };
 use tokio::{io, io::AsyncBufReadExt, select};
 use tracing_subscriber::{EnvFilter};
@@ -35,6 +35,7 @@ use kad::store::MemoryStore;
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
+    upnp: upnp::tokio::Behaviour,
     gossipsub: gossipsub::Behaviour,
     mdns: mdns::tokio::Behaviour,
     ping: ping::Behaviour,
@@ -64,6 +65,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )?
         .with_quic()
         .with_dns()?
+        .with_websocket( // <-- Вот он, родной
+            noise::Config::new,
+            yamux::Config::default
+        ).await.unwrap()
         .with_relay_client(noise::Config::new, yamux::Config::default)?
         .with_behaviour(|key, relay| {
             // To content-address message, we can take the hash of message and use it as an ID.
@@ -126,8 +131,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // let relay = relay::Behaviour::new(key.public().to_peer_id(), relay_config);
 
             let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
+
+            let upnp = upnp::tokio::Behaviour::default();
             
             Ok(MyBehaviour { 
+                upnp,
                 gossipsub, 
                 mdns,
                 ping,
@@ -185,7 +193,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
     let relays = vec![
-        "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x"
+        "/dns4/lighthouse-1.mainnet.libp2p.io/tcp/443/wss/p2p/12D3KooWBPUn8Knoo9S7SAn2H77L67v5p5YFymUoPrkX4W42vC4X",
+        "/dns4/bootstrap.libp2p.io/tcp/443/wss/p2p/QmNnoo2u5Bn2vH3AtM9869V27EE38E2NcAWhN2v96Be4uS",
+        "/ip4/147.75.80.110/tcp/4001/p2p/QmbLHAnMo6iC62m8CD6GvLpLw8yeMEn6FCHAnH3R9mPr9E",
+        "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x",
     ];
 
     for relay_str in relays.clone() {
@@ -226,6 +237,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             event = swarm.select_next_some() => match event {
+                SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::NewExternalAddr(external_addr))) => {
+                    println!("New external address: {external_addr}");
+                }
+                SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::GatewayNotFound)) => {
+                    println!("Gateway does not support UPnP");
+                }
+                SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::NonRoutableGateway)) => {
+                    println!("Gateway is not exposed directly to the public Internet, i.e. it itself has a private IP address.");
+                }
                 SwarmEvent::ExternalAddrExpired { address } => {
                     println!("❌ Адрес протух: {address}");
                     // Тут НУЖНО заново вызвать listen_on на реле
