@@ -111,12 +111,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .build();
     
     let bootstraps = [
-        ("/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ", "Mars"),
-        ("/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN", "Libp2p-org"),
-        ("/ip4/147.75.83.83/tcp/4001/p2p/QmbLHAnMo9UFnmRR4zvKU912ZVeC8P7Bg3gixS6S8Xk8G9", "Protocol-Labs"),
+        "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+        "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+        "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+        "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+        "/dnsaddr/va1.bootstrap.libp2p.io/p2p/12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
+        "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
+        "/ip4/104.131.131.82/udp/4001/quic-v1/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
     ];
 
-    for (addr_str, _) in bootstraps {
+    for addr_str in bootstraps {
         let addr_arr: Vec<&str> = addr_str.split("/").collect();
         let addr_short = addr_arr[..addr_arr.len().saturating_sub(2)].join("/");
         let addr = Multiaddr::from_str(&addr_short).unwrap();
@@ -124,7 +128,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let peer_id = PeerId::from_str(&peer_id_str).unwrap();
 
         swarm.behaviour_mut().kademilia.add_address(&peer_id, addr);
-        swarm.dial(Multiaddr::from_str(&addr_str).unwrap()).ok(); // Сразу звоним им всем
+        // swarm.dial(Multiaddr::from_str(&addr_str).unwrap()).ok(); // Сразу звоним им всем
     }
 
 
