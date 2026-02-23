@@ -26,7 +26,7 @@ use std::{
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, autonat, gossipsub, identify, kad, mdns, noise, ping, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
+    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad, mdns, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
 };
 use tokio::{io, io::AsyncBufReadExt, select};
 use tracing_subscriber::EnvFilter;
@@ -40,7 +40,9 @@ struct MyBehaviour {
     ping: ping::Behaviour,
     identify: identify::Behaviour,
     kademilia: kad::Behaviour<MemoryStore>,
-    autonat: autonat::Behaviour
+    autonat: autonat::Behaviour,
+    relay: relay::Behaviour,
+    dcutr: dcutr::Behaviour
 }
 
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
@@ -114,13 +116,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 autonat_config,
             );
 
+            let relay_config = relay::Config::default();
+            let relay = relay::Behaviour::new(key.public().to_peer_id(), relay_config);
+
+            let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
+            
             Ok(MyBehaviour { 
                 gossipsub, 
                 mdns,
                 ping,
                 identify,
                 kademilia,
-                autonat
+                autonat,
+                relay,
+                dcutr
             })
         })?
         .build();
