@@ -21,12 +21,12 @@
 #![doc = include_str!("../README.md")]
 
 use std::{
-    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, ops::Add, str::FromStr, time::{self, Duration}
+    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, str::FromStr, time::{Duration}
 };
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
+    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
 };
 use tokio::{io, io::AsyncBufReadExt, select};
 use tracing_subscriber::{EnvFilter};
@@ -171,6 +171,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.behaviour_mut()
         .kademilia.bootstrap().ok();
 
+    let topic_key = RecordKey::new(&topic.to_string());
+
     // Read full lines from stdin
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
@@ -184,36 +186,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with(Protocol::P2p(relay_peer_id))
         .with(Protocol::P2pCircuit);
 
-    // swarm.dial(relay_peer_id).unwrap();
-    swarm.dial(relay_addr.clone() ).unwrap();
+    // swarm.dial(relay_addr.clone() ).unwrap();
 
     // === LISTENERS ===
-    swarm.listen_on("/ip4/0.0.0.0/tcp /0".parse()?)?;
+    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
     swarm.listen_on(target.clone())?;
 
+    let local_peer_id = *swarm.local_peer_id();
     println!("Enter messages via STDIN and they will be sent to connected peers using Gossipsub");
-    println!("Swarm local peer id {}", swarm.local_peer_id());
-
+    println!("Swarm local peer id {}", local_peer_id.clone());
+    println!("Relay {}", target.to_string());
     // Kick it off
     let mut stats_timer = tokio::time::interval(std::time::Duration::from_secs(3));
-    let mut relay_disconnect_time = time::SystemTime::now();
-    let mut relay_is_connected = true;
+
+    let mut last_provisioning = tokio::time::interval(std::time::Duration::from_mins(1));
+
     loop {
-
-        // Reconnecting to relay
-        if !relay_is_connected {
-            let now = time::SystemTime::now();
-            let reconnect_time = relay_disconnect_time.add(Duration::from_secs(5));
-            if now > reconnect_time {
-                println!("📡 Пробую поднять реле...");
-                let _ = swarm.dial(relay_addr.clone());
-                let _ = swarm.listen_on(target.clone());
-                relay_disconnect_time = now;
-            } 
-        }
-
         select! {
+            _ = last_provisioning.tick() => {
+                swarm.behaviour_mut()
+                    .kademilia.start_providing(topic_key.clone()).unwrap();
+                swarm.behaviour_mut()
+                    .kademilia.get_providers(topic_key.clone());
+                println!("📡 Kademilia provisioning");
+            }
             Ok(Some(line)) = stdin.next_line() => {
                 if let Err(e) = swarm
                     .behaviour_mut().gossipsub
@@ -222,6 +219,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             event = swarm.select_next_some() => match event {
+                SwarmEvent::ExternalAddrExpired { address } => {
+                    println!("❌ Адрес протух: {address}");
+                    // Тут НУЖНО заново вызвать listen_on на реле
+                    swarm.listen_on(target.clone()).unwrap();
+                }
                 SwarmEvent::NewListenAddr { address, .. } => {
                     println!("📡 Слушаем на: {:?}", address);
                 }
@@ -230,8 +232,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 SwarmEvent::ConnectionClosed { peer_id, .. } if peer_id == relay_peer_id => {
                     println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
-                    relay_disconnect_time = time::SystemTime::now();
-                    relay_is_connected = false;
                 }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, _multiaddr) in list {
@@ -245,13 +245,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                     }
                 },
-                SwarmEvent::Behaviour(MyBehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted { .. })) => {
+                SwarmEvent::Behaviour(MyBehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted {
+                    .. 
+                })) => {
                     println!("📡 Реле подключилось");
-                    relay_is_connected = true;
-                }
-                // Если всё рухнуло — разрешаем переподключение
-                SwarmEvent::ConnectionClosed { peer_id, .. } if peer_id == relay_peer_id => {
-                    relay_is_connected = false;
+                    let ext_addresses: Vec<Multiaddr> =  swarm.external_addresses().cloned().collect();
+                    let behaviour = swarm.behaviour_mut();
+                    for ext in ext_addresses {
+                        behaviour.kademilia.add_address(&local_peer_id, ext.clone());
+                        println!("📡 Kademlia record {}:{}", &local_peer_id, &ext.clone().to_string());
+                    }
                 }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                     propagation_source: peer_id,
@@ -266,6 +269,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 },
                 SwarmEvent::Behaviour(MyBehaviourEvent::Dcutr(event)) => {
                     println!("🛠️ DCUtR Event: {:?}", event);
+                }
+                SwarmEvent::Behaviour(MyBehaviourEvent::Identify(identify::Event::Received { peer_id, info })) => {
+                    if peer_id == relay_peer_id {
+                        println!("🛠 Протоколы реле: {:?}", peer_id);
+                        for p in info.protocols {
+                            println!("🚀 {}", p)
+                        }
+                    }
+                }
+                SwarmEvent::Behaviour(MyBehaviourEvent::Kademilia(kad::Event::OutboundQueryProgressed { result, .. })) => {
+                    match result {
+                        kad::QueryResult::GetProviders(Ok(ok)) => {
+                            match ok {
+                                kad::GetProvidersOk::FoundProviders { providers, .. } => {
+                                    for peer_id in providers {
+                                        if peer_id != local_peer_id {
+                                            println!("📍 Нашел провайдера: {peer_id}. Пробую Dial...");
+                                            let _ = swarm.dial(peer_id);
+                                        }
+                                    }
+                                },
+                                _ => {
+                                    println!("🏁 Поиск завершен");
+                                }
+                            }
+                        }
+                        _ => {
+                            println!("=== KAD PROGRESS: {:?} ===", result);
+                        }
+                    }
                 }
                 _ => {}
             },
