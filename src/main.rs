@@ -93,8 +93,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
 
             let ping_config = ping::Config::new()
-                .with_interval(std::time::Duration::from_secs(15)) // Пингуем каждые 15 сек
-                .with_timeout(std::time::Duration::from_secs(20));
+                .with_interval(std::time::Duration::from_secs(5)) // Пингуем каждые 15 сек
+                .with_timeout(std::time::Duration::from_secs(1));
             let ping = ping::Behaviour::new(ping_config);
             
             let identify_config = identify::Config::new(
@@ -190,7 +190,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // === LISTENERS ===
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
-    swarm.listen_on(target)?;
+    swarm.listen_on(target.clone())?;
 
     println!("Enter messages via STDIN and they will be sent to connected peers using Gossipsub");
     println!("Swarm local peer id {}", swarm.local_peer_id());
@@ -198,16 +198,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Kick it off
     let mut stats_timer = tokio::time::interval(std::time::Duration::from_secs(3));
     let mut relay_disconnect_time = time::SystemTime::now();
+    let mut relay_is_connected = true;
     loop {
 
         // Reconnecting to relay
-        let relay_connected = swarm.external_addresses().count();
-        if relay_connected == 0 {
+        if !relay_is_connected {
             let now = time::SystemTime::now();
             let reconnect_time = relay_disconnect_time.add(Duration::from_secs(5));
             if now > reconnect_time {
-                println!("📡 Reconnecting to Relay!");
-                swarm.dial(relay_addr.clone()).unwrap();
+                println!("📡 Пробую поднять реле...");
+                let _ = swarm.dial(relay_addr.clone());
+                let _ = swarm.listen_on(target.clone());
+                relay_disconnect_time = now;
             } 
         }
 
@@ -226,19 +228,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::IncomingConnection { .. } => {
                     println!("📥 Входящее соединение...");
                 }
-                // SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                    // println!("🤝 Соединение установлено с {:?}. Адрес: {:?}", peer_id, endpoint.get_remote_address());
-                // }
-                // SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                    // println!("❌ Ошибка исходящего к {:?}: {:?}", peer_id, error);
-                // }
                 SwarmEvent::ConnectionClosed { peer_id, .. } if peer_id == relay_peer_id => {
                     println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
                     relay_disconnect_time = time::SystemTime::now();
                 }
-                SwarmEvent::Behaviour(MyBehaviourEvent::Relay(e)) => {
-                    println!("🚩 СОБЫТИЕ РЕЛЕ: {:?}", e); // Если тут пусто, значит запрос не дошел
-                },
                 SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, _multiaddr) in list {
                         println!("mDNS discovered a new peer: {peer_id}");
@@ -251,6 +244,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                     }
                 },
+                SwarmEvent::Behaviour(MyBehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted { .. })) => {
+                    relay_is_connected = true;
+                }
+                // Если всё рухнуло — разрешаем переподключение
+                SwarmEvent::ConnectionClosed { peer_id, .. } if peer_id == relay_peer_id => {
+                    relay_is_connected = false;
+                }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                     propagation_source: peer_id,
                     message_id: id,
