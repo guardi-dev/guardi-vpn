@@ -26,7 +26,7 @@ use std::{
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad, mdns, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
+    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
 };
 use tokio::{io, io::AsyncBufReadExt, select};
 use tracing_subscriber::EnvFilter;
@@ -41,7 +41,7 @@ struct MyBehaviour {
     identify: identify::Behaviour,
     kademilia: kad::Behaviour<MemoryStore>,
     autonat: autonat::Behaviour,
-    relay: relay::Behaviour,
+    relay: relay::client::Behaviour,
     dcutr: dcutr::Behaviour
 }
 
@@ -64,7 +64,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )?
         .with_quic()
         .with_dns()?
-        .with_behaviour(|key| {
+        .with_relay_client(noise::Config::new, yamux::Config::default)?
+        .with_behaviour(|key, relay| {
             // To content-address message, we can take the hash of message and use it as an ID.
             let message_id_fn = |message: &gossipsub::Message| {
                 let mut s = DefaultHasher::new();
@@ -93,10 +94,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let ping = ping::Behaviour::new(ping::Config::new());
             
-            let identify = identify::Behaviour::new(identify::Config::new(
+            let identify_config = identify::Config::new(
                 "/ipfs/id/1.0.0".to_string(),
                 key.public(),
-            ));
+            ).with_push_listen_addr_updates(true);
+            let identify = identify::Behaviour::new(identify_config);
 
             let store = MemoryStore::new(key.public().to_peer_id());
             let mut cfg = kad::Config::default();
@@ -116,8 +118,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 autonat_config,
             );
 
-            let relay_config = relay::Config::default();
-            let relay = relay::Behaviour::new(key.public().to_peer_id(), relay_config);
+            // let relay_config = relay::Config::default();
+            // let relay = relay::Behaviour::new(key.public().to_peer_id(), relay_config);
 
             let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
             
@@ -152,7 +154,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let peer_id = PeerId::from_str(&peer_id_str).unwrap();
 
         swarm.behaviour_mut().kademilia.add_address(&peer_id, addr);
-        // swarm.dial(Multiaddr::from_str(&addr_str).unwrap()).ok(); // Сразу звоним им всем
+        swarm.dial(Multiaddr::from_str(&addr_str).unwrap()).ok(); // Сразу звоним им всем
     }
 
 
@@ -169,10 +171,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Read full lines from stdin
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
-    // Listen on all interfaces and whatever port the OS assigns
-    swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
+    let relay_str = "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x";
+    let relay_arr: Vec<&str> = relay_str.split("/p2p/").collect();
+    let relay_addr = Multiaddr::from_str(relay_arr[0]).unwrap();
+    let relay_peer_id = PeerId::from_str(relay_arr[1]).unwrap();
+    println!("{} {}", relay_addr, relay_peer_id);
+
+    let target = relay_addr.clone()
+        .with(Protocol::P2p(relay_peer_id))
+        .with(Protocol::P2pCircuit);
+    swarm.dial(relay_addr.clone()).unwrap();
+
+    // === LISTENERS ===
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
-    // let _ = swarm.dial("/ip4/104.131.131.82/udp/4001/quic-v1/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ".parse::<Multiaddr>().unwrap());
+    swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
+    swarm.listen_on(target)?;
 
     println!("Enter messages via STDIN and they will be sent to connected peers using Gossipsub");
     println!("Swarm local peer id {}", swarm.local_peer_id());
@@ -189,6 +202,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             event = swarm.select_next_some() => match event {
+                SwarmEvent::NewListenAddr { address, .. } => {
+                    println!("📡 Слушаем на: {:?}", address);
+                }
+                SwarmEvent::IncomingConnection { .. } => {
+                    println!("📥 Входящее соединение...");
+                }
+                SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                    println!("🤝 Соединение установлено с {:?}. Адрес: {:?}", peer_id, endpoint.get_remote_address());
+                }
+                // SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                    // println!("❌ Ошибка исходящего к {:?}: {:?}", peer_id, error);
+                // }
+                SwarmEvent::Behaviour(MyBehaviourEvent::Relay(e)) => {
+                    println!("🚩 СОБЫТИЕ РЕЛЕ: {:?}", e); // Если тут пусто, значит запрос не дошел
+                },
                 SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, _multiaddr) in list {
                         println!("mDNS discovered a new peer: {peer_id}");
@@ -209,15 +237,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "Got message: '{}' with id: {id} from peer: {peer_id}",
                         String::from_utf8_lossy(&message.data),
                     ),
-                SwarmEvent::NewListenAddr { address, .. } => {
-                    println!("Local node is listening on {address}");
-                },
-                SwarmEvent::OutgoingConnectionError { .. } => {
-                    // println!("Outgoing Connection Error {}", error);
-                },
                 SwarmEvent::Behaviour(MyBehaviourEvent::Autonat(autonat::Event::StatusChanged { old, new })) => {
                     println!("🌐 Статус NAT изменился: {:?} -> {:?}", old, new);
                 },
+                SwarmEvent::Behaviour(MyBehaviourEvent::Dcutr(event)) => {
+                    println!("🛠️ DCUtR Event: {:?}", event);
+                }
                 _ => {}
             },
             _ = stats_timer.tick() => {
@@ -238,11 +263,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let gossip_peers = behaviour.gossipsub.all_peers().count();
                 let room_peers = behaviour.gossipsub.all_peers().filter(|(_,t)| t.contains(&&topic.hash())).count();
 
-                for (_, topics) in behaviour.gossipsub.all_peers() {
-                    for topic in topics {
-                        println!("Topic: {}", topic);
-                    }
-                }
+                // for (_, topics) in behaviour.gossipsub.all_peers() {
+                //     for topic in topics {
+                //         println!("Topic: {}", topic);
+                //     }
+                // }
 
                 // 3. Общее кол-во активных соединений Swarm
                 let active_connections = swarm.network_info().num_peers();
@@ -253,6 +278,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("💬 В сети (Gossipsub)      : {}", gossip_peers);
                 println!("💬 В комнате (guardi-vpn)  : {}", room_peers);
                 println!("--------------------------");
+                println!("{:?}", swarm.external_addresses().collect::<Vec<_>>());
             }
         }
     }
