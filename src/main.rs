@@ -213,7 +213,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("🌐 Соединений (Swarm)      : {}", active_connections);
                 println!("📚 В таблице (Kademlia)    : {}", total_kad_peers);
                 println!("💬 В сети (Gossipsub)      : {}", gossip_peers);
-                println!("💬 В комнате ({})  : {}", topic.clone(), room_peers);
+                println!("💬 В комнате (guardi-vpn)  : {}", room_peers);
                 println!("--------------------------");
             }
         }
