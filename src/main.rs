@@ -238,17 +238,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             event = swarm.select_next_some() => match event {
                 // 1. Ошибка самого транспорта (DNS, TCP, WS)
-                SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                    println!("❌ Ошибка исходящего соединения к {:?}: {:?}", peer_id, error);
-                },
+                // SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                    // println!("❌ Ошибка исходящего соединения к {:?}: {:?}", peer_id, error);
+                // },
                 // 2. Ошибка на уровне протоколов (например, не договорились по Noise или Yamux)
-                SwarmEvent::IncomingConnectionError { send_back_addr, error, .. } => {
-                    println!("❌ Ошибка входящего соединения с {}: {:?}", send_back_addr, error);
-                },
+                // SwarmEvent::IncomingConnectionError { send_back_addr, error, .. } => {
+                    // println!("❌ Ошибка входящего соединения с {}: {:?}", send_back_addr, error);
+                // },
                 // 3. Если адрес невалидный или не поддерживается транспортом
-                SwarmEvent::Dialing { peer_id, .. } => {
-                    println!("🔌 Пытаюсь дозвониться до {:?}...", peer_id);
-                },
+                // SwarmEvent::Dialing { peer_id, .. } => {
+                    // println!("🔌 Пытаюсь дозвониться до {:?}...", peer_id);
+                // },
                 SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::NewExternalAddr(external_addr))) => {
                     println!("New external address: {external_addr}");
                 }
