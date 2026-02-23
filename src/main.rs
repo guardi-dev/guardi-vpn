@@ -21,7 +21,7 @@
 #![doc = include_str!("../README.md")]
 
 use std::{
-    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, str::FromStr, time::Duration
+    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, ops::Add, str::FromStr, time::{self, Duration}
 };
 
 use futures::stream::StreamExt;
@@ -29,7 +29,7 @@ use libp2p::{
     Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
 };
 use tokio::{io, io::AsyncBufReadExt, select};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{EnvFilter, fmt::time::SystemTime};
 use kad::store::MemoryStore;
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
@@ -197,7 +197,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Kick it off
     let mut stats_timer = tokio::time::interval(std::time::Duration::from_secs(3));
+    let mut relay_disconnect_time = time::SystemTime::now();
     loop {
+
+        // Reconnecting to relay
+        let relay_connected = swarm.external_addresses().count();
+        if relay_connected == 0 {
+            let now = time::SystemTime::now();
+            let reconnect_time = relay_disconnect_time.add(Duration::from_secs(5));
+            if now > reconnect_time {
+                println!("📡 Reconnecting to Relay!");
+                swarm.dial(relay_addr.clone()).unwrap();
+            } 
+        }
+
         select! {
             Ok(Some(line)) = stdin.next_line() => {
                 if let Err(e) = swarm
@@ -221,8 +234,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 // }
                 SwarmEvent::ConnectionClosed { peer_id, .. } if peer_id == relay_peer_id => {
                     println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
-                    // swarm.dial(relay_addr.clone()).unwrap();
-                    // Тут можно запустить таймер или просто вызвать dial/listen_on снова
+                    relay_disconnect_time = time::SystemTime::now();
                 }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Relay(e)) => {
                     println!("🚩 СОБЫТИЕ РЕЛЕ: {:?}", e); // Если тут пусто, значит запрос не дошел
