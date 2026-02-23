@@ -26,7 +26,7 @@ use std::{
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, gossipsub, identify, kad, mdns, noise, ping, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
+    Multiaddr, PeerId, StreamProtocol, autonat, gossipsub, identify, kad, mdns, noise, ping, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
 };
 use tokio::{io, io::AsyncBufReadExt, select};
 use tracing_subscriber::EnvFilter;
@@ -39,7 +39,8 @@ struct MyBehaviour {
     mdns: mdns::tokio::Behaviour,
     ping: ping::Behaviour,
     identify: identify::Behaviour,
-    kademilia: kad::Behaviour<MemoryStore>
+    kademilia: kad::Behaviour<MemoryStore>,
+    autonat: autonat::Behaviour
 }
 
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
@@ -100,12 +101,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let protos = vec![IPFS_PROTO_NAME];
             cfg.set_protocol_names(protos);
             let kademilia = kad::Behaviour::with_config(key.public().to_peer_id(), store, cfg);
+
+            let autonat_config = autonat::Config {
+                retry_interval: Duration::from_secs(10),
+                refresh_interval: Duration::from_secs(30),
+                boot_delay: Duration::from_secs(5),
+                ..Default::default()
+            };
+
+            let autonat = autonat::Behaviour::new(
+                key.public().to_peer_id(),
+                autonat_config,
+            );
+
             Ok(MyBehaviour { 
                 gossipsub, 
                 mdns,
                 ping,
                 identify,
-                kademilia
+                kademilia,
+                autonat
             })
         })?
         .build();
@@ -191,10 +206,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::OutgoingConnectionError { .. } => {
                     // println!("Outgoing Connection Error {}", error);
                 },
+                SwarmEvent::Behaviour(MyBehaviourEvent::Autonat(autonat::Event::StatusChanged { old, new })) => {
+                    println!("🌐 Статус NAT изменился: {:?} -> {:?}", old, new);
+                },
                 _ => {}
             },
             _ = stats_timer.tick() => {
-                clearscreen::clear().expect("failed to clear screen");
+                // clearscreen::clear().expect("failed to clear screen");
 
                 let behaviour = swarm.behaviour_mut();
                 let res = behaviour.gossipsub.publish(topic.clone(), format!("Hello world {}", rand::random::<u8>()));
