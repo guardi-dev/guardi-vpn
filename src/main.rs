@@ -21,7 +21,7 @@
 #![doc = include_str!("../README.md")]
 
 use std::{
-    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, str::FromStr, time::{Duration}
+    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, str::FromStr, time::Duration
 };
 
 use futures::stream::StreamExt;
@@ -190,13 +190,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // === LISTENERS ===
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    swarm.listen_on("/ip4/0.0.0.0/tcp/0/ws".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
     let relays = vec![
-        "/dns4/lighthouse-1.mainnet.libp2p.io/tcp/443/wss/p2p/12D3KooWBPUn8Knoo9S7SAn2H77L67v5p5YFymUoPrkX4W42vC4X",
-        "/dns4/bootstrap.libp2p.io/tcp/443/wss/p2p/QmNnoo2u5Bn2vH3AtM9869V27EE38E2NcAWhN2v96Be4uS",
-        "/ip4/147.75.80.110/tcp/4001/p2p/QmbLHAnMo6iC62m8CD6GvLpLw8yeMEn6FCHAnH3R9mPr9E",
-        "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x",
+        "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN", // working
+        "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x", // working
     ];
 
     for relay_str in relays.clone() {
@@ -209,6 +208,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .with(Protocol::P2pCircuit);
 
         swarm.listen_on(target.clone())?;
+        // swarm.dial(Multiaddr::from_str(&relay_str).unwrap()).unwrap();
         println!("📡 Subscribe to relays {}", relay_str);
     }
 
@@ -237,6 +237,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             event = swarm.select_next_some() => match event {
+                // 1. Ошибка самого транспорта (DNS, TCP, WS)
+                SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                    println!("❌ Ошибка исходящего соединения к {:?}: {:?}", peer_id, error);
+                },
+                // 2. Ошибка на уровне протоколов (например, не договорились по Noise или Yamux)
+                SwarmEvent::IncomingConnectionError { send_back_addr, error, .. } => {
+                    println!("❌ Ошибка входящего соединения с {}: {:?}", send_back_addr, error);
+                },
+                // 3. Если адрес невалидный или не поддерживается транспортом
+                SwarmEvent::Dialing { peer_id, .. } => {
+                    println!("🔌 Пытаюсь дозвониться до {:?}...", peer_id);
+                },
                 SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::NewExternalAddr(external_addr))) => {
                     println!("New external address: {external_addr}");
                 }
@@ -249,7 +261,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::ExternalAddrExpired { address } => {
                     println!("❌ Адрес протух: {address}");
                     // Тут НУЖНО заново вызвать listen_on на реле
-                    // swarm.listen_on(target.clone()).unwrap();
+                    // swarm.listen_on(address).unwrap();
                 }
                 SwarmEvent::NewListenAddr { address, .. } => {
                     println!("📡 Слушаем на: {:?}", address);
@@ -260,7 +272,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::ConnectionClosed { peer_id, .. } => {
                     for relay in relays.clone() {
                         if relay.contains(&peer_id.to_string()) {
-                            swarm.dial(Multiaddr::from_str(&relay).unwrap()).unwrap();
+                            // swarm.dial(Multiaddr::from_str(&relay).unwrap()).unwrap();
                             println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
                         }
                     }
