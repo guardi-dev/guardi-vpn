@@ -171,6 +171,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.behaviour_mut()
         .kademilia.bootstrap().ok();
 
+    swarm.behaviour_mut()
+        .kademilia.set_mode(Some(libp2p::kad::Mode::Client));
+
     let topic_key = RecordKey::new(&topic.to_string());
 
     // Read full lines from stdin
