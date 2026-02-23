@@ -129,7 +129,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 
     // Create a Gossipsub topic
-    let topic = gossipsub::IdentTopic::new("ALEPH_ALIVE");
+    let topic = gossipsub::IdentTopic::new("guardi-vpn");
     // subscribes to our topic
     
     swarm.behaviour_mut()
