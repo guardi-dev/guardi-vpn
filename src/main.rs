@@ -179,27 +179,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Read full lines from stdin
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
-    let relay_str = "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x";
-    let relay_arr: Vec<&str> = relay_str.split("/p2p/").collect();
-    let relay_addr = Multiaddr::from_str(relay_arr[0]).unwrap();
-    let relay_peer_id = PeerId::from_str(relay_arr[1]).unwrap();
-    println!("{} {}", relay_addr, relay_peer_id);
-
-    let target = relay_addr.clone()
-        .with(Protocol::P2p(relay_peer_id))
-        .with(Protocol::P2pCircuit);
-
-    // swarm.dial(relay_addr.clone() ).unwrap();
-
     // === LISTENERS ===
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
-    swarm.listen_on(target.clone())?;
+
+    let relays = vec![
+        "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x"
+    ];
+
+    for relay_str in relays.clone() {
+        let relay_arr: Vec<&str> = relay_str.split("/p2p/").collect();
+        let relay_addr = Multiaddr::from_str(relay_arr[0]).unwrap();
+        let relay_peer_id = PeerId::from_str(relay_arr[1]).unwrap();
+
+        let target = relay_addr.clone()
+            .with(Protocol::P2p(relay_peer_id))
+            .with(Protocol::P2pCircuit);
+
+        swarm.listen_on(target.clone())?;
+        println!("📡 Subscribe to relays {}", relay_str);
+    }
 
     let local_peer_id = *swarm.local_peer_id();
     println!("Enter messages via STDIN and they will be sent to connected peers using Gossipsub");
     println!("Swarm local peer id {}", local_peer_id.clone());
-    println!("Relay {}", target.to_string());
     // Kick it off
     let mut stats_timer = tokio::time::interval(std::time::Duration::from_secs(3));
 
@@ -225,7 +228,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::ExternalAddrExpired { address } => {
                     println!("❌ Адрес протух: {address}");
                     // Тут НУЖНО заново вызвать listen_on на реле
-                    swarm.listen_on(target.clone()).unwrap();
+                    // swarm.listen_on(target.clone()).unwrap();
                 }
                 SwarmEvent::NewListenAddr { address, .. } => {
                     println!("📡 Слушаем на: {:?}", address);
@@ -233,8 +236,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 SwarmEvent::IncomingConnection { .. } => {
                     println!("📥 Входящее соединение...");
                 }
-                SwarmEvent::ConnectionClosed { peer_id, .. } if peer_id == relay_peer_id => {
-                    println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
+                SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                    for relay in relays.clone() {
+                        if relay.contains(&peer_id.to_string()) {
+                            println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
+                        }
+                    }
                 }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, _multiaddr) in list {
@@ -274,10 +281,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("🛠️ DCUtR Event: {:?}", event);
                 }
                 SwarmEvent::Behaviour(MyBehaviourEvent::Identify(identify::Event::Received { peer_id, info })) => {
-                    if peer_id == relay_peer_id {
-                        println!("🛠 Протоколы реле: {:?}", peer_id);
-                        for p in info.protocols {
-                            println!("🚀 {}", p)
+                    for relay_addr in relays.clone() {
+                        if relay_addr.contains(&peer_id.to_string()) {
+                            println!("🛠 Протоколы реле: {:?}", peer_id);
+                            for p in info.protocols.iter() {
+                                println!("🚀 {}", p)
+                            }
                         }
                     }
                 }
