@@ -29,7 +29,7 @@ use libp2p::{
     Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux
 };
 use tokio::{io, io::AsyncBufReadExt, select};
-use tracing_subscriber::{EnvFilter, fmt::time::SystemTime};
+use tracing_subscriber::{EnvFilter};
 use kad::store::MemoryStore;
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
