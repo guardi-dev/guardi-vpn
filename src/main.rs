@@ -188,7 +188,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.dial(relay_addr.clone() ).unwrap();
 
     // === LISTENERS ===
-    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    swarm.listen_on("/ip4/0.0.0.0/tcp /0".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
     swarm.listen_on(target.clone())?;
 
