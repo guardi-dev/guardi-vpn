@@ -129,7 +129,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 
     // Create a Gossipsub topic
-    let topic = gossipsub::IdentTopic::new("guardi-vpn");
+    let topic = gossipsub::IdentTopic::new("ALEPH_ALIVE");
     // subscribes to our topic
     
     swarm.behaviour_mut()
@@ -190,6 +190,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 _ => {}
             },
             _ = stats_timer.tick() => {
+                clearscreen::clear().expect("failed to clear screen");
+
                 let behaviour = swarm.behaviour_mut();
                 let res = behaviour.gossipsub.publish(topic.clone(), format!("Hello world {}", rand::random::<u8>()));
                 let _ = res.inspect_err(|e| eprintln!("Invalid publish: {e}"));
@@ -205,10 +207,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let gossip_peers = behaviour.gossipsub.all_peers().count();
                 let room_peers = behaviour.gossipsub.all_peers().filter(|(_,t)| t.contains(&&topic.hash())).count();
 
+                for (_, topics) in behaviour.gossipsub.all_peers() {
+                    for topic in topics {
+                        println!("Topic: {}", topic);
+                    }
+                }
+
                 // 3. Общее кол-во активных соединений Swarm
                 let active_connections = swarm.network_info().num_peers();
 
-                // clearscreen::clear().expect("failed to clear screen");
                 println!("--- 📊 СТАТИСТИКА НОДЫ ---");
                 println!("🌐 Соединений (Swarm)      : {}", active_connections);
                 println!("📚 В таблице (Kademlia)    : {}", total_kad_peers);
