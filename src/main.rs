@@ -74,6 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
                 .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message
                 // signing)
+                .mesh_n_low(2)
                 .message_id_fn(message_id_fn) // content-address messages. No two messages of the same content will be propagated.
                 .build()
                 .map_err(io::Error::other)?; // Temporary hack because `build` does not return a proper `std::error::Error`.
@@ -126,13 +127,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         swarm.dial(Multiaddr::from_str(&addr_str).unwrap()).ok(); // Сразу звоним им всем
     }
 
-    swarm.behaviour_mut().kademilia.bootstrap().ok();
 
     // Create a Gossipsub topic
-    let topic = gossipsub::IdentTopic::new("floodsub");
+    let topic = gossipsub::IdentTopic::new("guardi-vpn");
     // subscribes to our topic
+    
     swarm.behaviour_mut()
         .gossipsub.subscribe(&topic)?;
+
+    swarm.behaviour_mut()
+        .kademilia.bootstrap().ok();
 
     // Read full lines from stdin
     let mut stdin = io::BufReader::new(io::stdin()).lines();
@@ -140,14 +144,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Listen on all interfaces and whatever port the OS assigns
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
-
     // let _ = swarm.dial("/ip4/104.131.131.82/udp/4001/quic-v1/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ".parse::<Multiaddr>().unwrap());
 
     println!("Enter messages via STDIN and they will be sent to connected peers using Gossipsub");
+    println!("Swarm local peer id {}", swarm.local_peer_id());
 
     // Kick it off
-    let mut stats_timer = tokio::time::interval(std::time::Duration::from_secs(1));
-
+    let mut stats_timer = tokio::time::interval(std::time::Duration::from_secs(3));
     loop {
         select! {
             Ok(Some(line)) = stdin.next_line() => {
@@ -188,7 +191,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             },
             _ = stats_timer.tick() => {
                 let behaviour = swarm.behaviour_mut();
-                
+                let res = behaviour.gossipsub.publish(topic.clone(), format!("Hello world {}", rand::random::<u8>()));
+                let _ = res.inspect_err(|e| eprintln!("Invalid publish: {e}"));
+
                 // 1. Статистика Кадемлии (сколько пиров мы ЗНАЕМ)
                 let mut total_kad_peers = 0;
                 for bucket in behaviour.kademilia.kbuckets() {
@@ -198,15 +203,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 // 2. Статистика Gossipsub (с кем мы реально БОЛТАЕМ)
                 // Берем первый попавшийся топик для примера
                 let gossip_peers = behaviour.gossipsub.all_peers().count();
+                let room_peers = behaviour.gossipsub.all_peers().filter(|(_,t)| t.contains(&&topic.hash())).count();
 
                 // 3. Общее кол-во активных соединений Swarm
                 let active_connections = swarm.network_info().num_peers();
 
-                clearscreen::clear().expect("failed to clear screen");
+                // clearscreen::clear().expect("failed to clear screen");
                 println!("--- 📊 СТАТИСТИКА НОДЫ ---");
-                println!("🌐 Соединений (Swarm):    {}", active_connections);
-                println!("📚 В таблице (Kademlia): {}", total_kad_peers);
-                println!("💬 В сети (Gossipsub):   {}", gossip_peers);
+                println!("🌐 Соединений (Swarm)      : {}", active_connections);
+                println!("📚 В таблице (Kademlia)    : {}", total_kad_peers);
+                println!("💬 В сети (Gossipsub)      : {}", gossip_peers);
+                println!("💬 В комнате ({})  : {}", topic.clone(), room_peers);
                 println!("--------------------------");
             }
         }
