@@ -1,6 +1,5 @@
-use color_eyre::owo_colors::Style;
 use ratatui::{
-    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Constraint, Layout, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line}, widgets::{Block, Padding, Paragraph, Tabs, Widget}
+    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Constraint, Layout, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, Padding, Paragraph, Tabs, Widget}
 };
 use crossterm::event::{EventStream};
 use crate::network::broadcast::{P2PBroadcast, EngineEvent};
@@ -27,13 +26,15 @@ pub struct App {
     /// History of recorded messages
     messages: Vec<String>,
 
-    selected_tab: SelectedTab
+    selected_tab: SelectedTab,
+
+    logs: Vec<String>,
 }
 
+const MAX_LOGS: u32 = 1000;
 
 enum InputMode {
     Normal,
-    Editing,
 }
 
 impl App {
@@ -42,6 +43,7 @@ impl App {
             input: String::new(),
             input_mode: InputMode::Normal,
             messages: Vec::new(),
+            logs: Vec::new(),
             character_index: 0,
             selected_tab: SelectedTab::Chat
         }
@@ -175,6 +177,12 @@ impl App {
 							let user_message = format!("[{}] {}", msg.sender, msg.content);
 							self.messages.push(user_message);
 						}
+                        Ok(EngineEvent::Log(msg)) => {
+                            self.logs.push(msg.content);
+                            if self.logs.len() > MAX_LOGS.try_into().unwrap() {
+                                self.logs.remove(0);
+                            }
+                        }
 						_ => {}
 					}
 				}
@@ -216,7 +224,16 @@ impl App {
                     .render(inner_area, buf);
             },
             SelectedTab::Logs => {
-
+                let logs: Vec<ListItem> = self.logs
+                    .iter()
+                    .map(|l| {
+                        let content = Line::from(Span::raw(format!("{l}")));
+                        ListItem::new(content)
+                    })
+                    .collect();
+                List::new(logs)
+                    .block(Block::bordered())
+                    .render(inner_area, buf);
             }
         }
         

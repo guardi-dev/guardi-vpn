@@ -6,7 +6,7 @@ use futures::stream::StreamExt;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, upnp, yamux
 };
-use tokio::{io, io::AsyncBufReadExt, select};
+use tokio::{io, select};
 use tracing_subscriber::{EnvFilter};
 use kad::store::MemoryStore;
 
@@ -178,9 +178,6 @@ impl  P2PEngine {
 
         let topic_key = RecordKey::new(&topic.to_string());
 
-        // Read full lines from stdin
-        let mut stdin = io::BufReader::new(io::stdin()).lines();
-
         // === LISTENERS ===
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
         swarm.listen_on("/ip4/0.0.0.0/tcp/0/ws".parse()?)?;
@@ -224,13 +221,6 @@ impl  P2PEngine {
                     swarm.behaviour_mut()
                         .kademilia.get_providers(topic_key.clone());
                     logln!(self, "📡 Kademilia provisioning");
-                }
-                Ok(Some(line)) = stdin.next_line() => {
-                    if let Err(e) = swarm
-                        .behaviour_mut().gossipsub
-                        .publish(topic.clone(), line.as_bytes()) {
-                        logln!(self, "Publish error: {e:?}");
-                    }
                 }
                 tx_event = tx.recv() => {
                     match tx_event {
