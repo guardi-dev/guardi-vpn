@@ -365,22 +365,6 @@ impl  P2PEngine {
                     // Берем первый попавшийся топик для примера
                     let gossip_peers = behaviour.gossipsub.all_peers().count();
                     let room_peers = behaviour.gossipsub.all_peers().filter(|(_,t)| t.contains(&&topic.hash())).count();
-
-                    // for (_, topics) in behaviour.gossipsub.all_peers() {
-                    //     for topic in topics {
-                    //         logln!(self, "Topic: {}", topic);
-                    //     }
-                    // }
-
-                    // 3. Общее кол-во активных соединений Swarm
-                    let active_connections = swarm.network_info().num_peers();
-
-                    logln!(self, "--- 📊 СТАТИСТИКА НОДЫ ---");
-                    logln!(self, "🌐 Соединений (Swarm)      : {}", active_connections);
-                    logln!(self, "📚 В таблице (Kademlia)    : {}", total_kad_peers);
-                    logln!(self, "💬 В сети (Gossipsub)      : {}", gossip_peers);
-                    logln!(self, "💬 В комнате (guardi-vpn)  : {}", room_peers);
-                    logln!(self, "--------------------------");
                     let ext_addresses: Vec<&Multiaddr> = swarm.external_addresses().collect();
                     let ext_addresses_count = ext_addresses.len();
                     for ex in ext_addresses {
