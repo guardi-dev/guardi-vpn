@@ -127,6 +127,8 @@ impl App {
 			terminal.draw(|frame| self.draw(frame))?;
 
 			tokio::select! {
+				biased;
+
 				key = reader.next() => {
 					match key {
 						Some(Ok(Event::Key(key))) => {
