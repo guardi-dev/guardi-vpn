@@ -143,6 +143,23 @@ impl App {
         self.selected_tab = self.selected_tab.next();
     }
 
+    fn scroll_down (&mut self) {
+        self.auto_scroll = true;
+        self.scroll_state.next();
+        self.list_state.scroll_down_by(1);
+    }
+
+    fn scroll_up (&mut self) {
+        self.auto_scroll = false;
+        self.scroll_state.prev();
+        self.list_state.scroll_up_by(1);
+    }
+    
+    fn scroll_last (&mut self) {
+        self.scroll_state.last();
+        self.list_state.select_last();
+    }
+
     pub async fn run(mut self, mut terminal: DefaultTerminal, broadcast: &P2PBroadcast) -> Result<(), anyhow::Error> {
 		let mut tx = broadcast.subscribe();
 		let mut reader = EventStream::new();
@@ -161,14 +178,10 @@ impl App {
                                     return Ok(());
                                 }
                                 KeyCode::Down => {
-                                    self.auto_scroll = true;
-                                    self.scroll_state.next();
-                                    self.list_state.scroll_down_by(1);
+                                    self.scroll_down();
                                 }
                                 KeyCode::Up => {
-                                    self.auto_scroll = false;
-                                    self.scroll_state.prev();
-                                    self.list_state.scroll_up_by(1);
+                                    self.scroll_up();
                                 }
                                 KeyCode::Enter => {
                                     // send message to p2p subscribers
@@ -255,8 +268,7 @@ impl App {
 
                 self.scroll_state = self.scroll_state.content_length(logs.clone().len());
                 if self.auto_scroll {
-                    self.scroll_state.last();
-                    self.list_state.select_last();
+                    self.scroll_last();
                 }
 
                 let list = List::new(logs.clone())
