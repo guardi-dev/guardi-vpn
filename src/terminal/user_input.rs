@@ -1,13 +1,14 @@
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyEventKind},
+    crossterm::event::{Event, KeyCode, KeyEventKind},
     layout::{Constraint, Layout, Position},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, List, ListItem, Paragraph},
     DefaultTerminal, Frame,
 };
-use crate::network::broadcast::{self, P2PBroadcast};
-
+use crossterm::event::{EventStream};
+use crate::network::broadcast::{P2PBroadcast, EngineEvent};
+use futures_util::StreamExt; // Важно для метода .next()
 /// App holds the state of the application
 pub struct App {
     /// Current value of the input box
@@ -99,11 +100,18 @@ impl App {
         self.reset_cursor();
     }
 
-	pub async fn default () {
+	pub async fn default (broadcast: &P2PBroadcast) {
+		color_eyre::install().unwrap();
+		let terminal = ratatui::init();
+		let _ = App::new().run(terminal, broadcast).await;
+		App::restore();
+	}
+
+	pub async fn default_broadcast () {
 		color_eyre::install().unwrap();
 		let terminal = ratatui::init();
 		let broadcast = P2PBroadcast::new();
-		let _ = App::new().run(terminal, broadcast).await;
+		let _ = App::new().run(terminal, &broadcast).await;
 		App::restore();
 	}
 
@@ -111,14 +119,50 @@ impl App {
 		ratatui::restore();
 	}
 
-    pub async fn run(mut self, mut terminal: DefaultTerminal, broadcast: P2PBroadcast) -> Result<(), anyhow::Error> {
+    pub async fn run(mut self, mut terminal: DefaultTerminal, broadcast: &P2PBroadcast) -> Result<(), anyhow::Error> {
 		let mut tx = broadcast.subscribe();
+		let mut reader = EventStream::new();
 
         loop {
+			terminal.draw(|frame| self.draw(frame))?;
+
 			tokio::select! {
+				key = reader.next() => {
+					match key {
+						Some(Ok(Event::Key(key))) => {
+							match self.input_mode {
+								InputMode::Normal => match key.code {
+									KeyCode::Char('e') => {
+										self.input_mode = InputMode::Editing;
+									}
+									KeyCode::Char('q') => {
+										return Ok(());
+									}
+									_ => {}
+								},
+								InputMode::Editing if key.kind == KeyEventKind::Press => match key.code {
+									KeyCode::Enter => {
+										// send message to p2p subscribers
+										broadcast.send_message(self.input.clone());
+										self.submit_message();
+									},
+									KeyCode::Char(to_insert) => self.enter_char(to_insert),
+									KeyCode::Backspace => self.delete_char(),
+									KeyCode::Left => self.move_cursor_left(),
+									KeyCode::Right => self.move_cursor_right(),
+									KeyCode::Esc => self.input_mode = InputMode::Normal,
+									_ => {}
+								},
+								InputMode::Editing => {}
+							}
+						}
+						_ => {}
+					}
+				}
+				
 				event = tx.recv() => {
 					match event {
-						Ok(broadcast::EngineEvent::Chat(msg)) => {
+						Ok(EngineEvent::Chat(msg)) => {
 							let user_message = format!("[{}] {}", msg.sender, msg.content);
 							self.messages.push(user_message);
 						}
@@ -126,37 +170,6 @@ impl App {
 					}
 				}
 			}
-
-            terminal.draw(|frame| self.draw(frame))?;
-
-
-            if let Event::Key(key) = event::read()? {
-                match self.input_mode {
-                    InputMode::Normal => match key.code {
-                        KeyCode::Char('e') => {
-                            self.input_mode = InputMode::Editing;
-                        }
-                        KeyCode::Char('q') => {
-                            return Ok(());
-                        }
-                        _ => {}
-                    },
-                    InputMode::Editing if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Enter => {
-							// send message to p2p subscribers
-							broadcast.send_message(self.input.clone());
-							self.submit_message();
-						},
-                        KeyCode::Char(to_insert) => self.enter_char(to_insert),
-                        KeyCode::Backspace => self.delete_char(),
-                        KeyCode::Left => self.move_cursor_left(),
-                        KeyCode::Right => self.move_cursor_right(),
-                        KeyCode::Esc => self.input_mode = InputMode::Normal,
-                        _ => {}
-                    },
-                    InputMode::Editing => {}
-                }
-            }
         }
     }
 
