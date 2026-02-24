@@ -12,6 +12,8 @@ use kad::store::MemoryStore;
 
 use crate::network::broadcast::{ChatMessage, P2PBroadcast, StatsMessage, EngineEvent};
 
+use crate::logln;
+
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
@@ -200,12 +202,12 @@ impl  P2PEngine {
 
             swarm.listen_on(target.clone())?;
             // swarm.dial(Multiaddr::from_str(&relay_str).unwrap()).unwrap();
-            println!("📡 Subscribe to relays {}", relay_str);
+            logln!(self, "📡 Subscribe to relays {}", relay_str);
         }
 
         let local_peer_id = *swarm.local_peer_id();
-        println!("Enter messages via STDIN and they will be sent to connected peers using Gossipsub");
-        println!("Swarm local peer id {}", local_peer_id.clone());
+        logln!(self, "Enter messages via STDIN and they will be sent to connected peers using Gossipsub");
+        logln!(self, "Swarm local peer id {}", local_peer_id.clone());
         // Kick it off
         let mut stats_timer = tokio::time::interval(std::time::Duration::from_secs(3));
 
@@ -221,13 +223,13 @@ impl  P2PEngine {
                         .kademilia.start_providing(topic_key.clone()).unwrap();
                     swarm.behaviour_mut()
                         .kademilia.get_providers(topic_key.clone());
-                    println!("📡 Kademilia provisioning");
+                    logln!(self, "📡 Kademilia provisioning");
                 }
                 Ok(Some(line)) = stdin.next_line() => {
                     if let Err(e) = swarm
                         .behaviour_mut().gossipsub
                         .publish(topic.clone(), line.as_bytes()) {
-                        println!("Publish error: {e:?}");
+                        logln!(self, "Publish error: {e:?}");
                     }
                 }
                 tx_event = tx.recv() => {
@@ -235,7 +237,7 @@ impl  P2PEngine {
                         Ok(EngineEvent::User(msg)) => {
                             let behaviour = swarm.behaviour_mut();
                             let res = behaviour.gossipsub.publish(topic.clone(), msg.content);
-                            let _ = res.inspect_err(|e| eprintln!("Invalid publish: {e}"));
+                            let _ = res.inspect_err(|e| logln!(self, "Invalid publish: {e}"));
                         }
                         _ => {}
                     }
@@ -243,65 +245,65 @@ impl  P2PEngine {
                 event = swarm.select_next_some() => match event {
                     // 1. Ошибка самого транспорта (DNS, TCP, WS)
                     // SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                        // println!("❌ Ошибка исходящего соединения к {:?}: {:?}", peer_id, error);
+                        // logln!(self, "❌ Ошибка исходящего соединения к {:?}: {:?}", peer_id, error);
                     // },
                     // 2. Ошибка на уровне протоколов (например, не договорились по Noise или Yamux)
                     // SwarmEvent::IncomingConnectionError { send_back_addr, error, .. } => {
-                        // println!("❌ Ошибка входящего соединения с {}: {:?}", send_back_addr, error);
+                        // logln!(self, "❌ Ошибка входящего соединения с {}: {:?}", send_back_addr, error);
                     // },
                     // 3. Если адрес невалидный или не поддерживается транспортом
                     // SwarmEvent::Dialing { peer_id, .. } => {
-                        // println!("🔌 Пытаюсь дозвониться до {:?}...", peer_id);
+                        // logln!(self, "🔌 Пытаюсь дозвониться до {:?}...", peer_id);
                     // },
                     SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::NewExternalAddr(external_addr))) => {
-                        println!("New external address: {external_addr}");
+                        logln!(self, "New external address: {external_addr}");
                     }
                     SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::GatewayNotFound)) => {
-                        println!("Gateway does not support UPnP");
+                        logln!(self, "Gateway does not support UPnP");
                     }
                     SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::NonRoutableGateway)) => {
-                        println!("Gateway is not exposed directly to the public Internet, i.e. it itself has a private IP address.");
+                        logln!(self, "Gateway is not exposed directly to the public Internet, i.e. it itself has a private IP address.");
                     }
                     SwarmEvent::ExternalAddrExpired { address } => {
-                        println!("❌ Адрес протух: {address}");
+                        logln!(self, "❌ Адрес протух: {address}");
                         // Тут НУЖНО заново вызвать listen_on на реле
                         // swarm.listen_on(address).unwrap();
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
-                        println!("📡 Слушаем на: {:?}", address);
+                        logln!(self, "📡 Слушаем на: {:?}", address);
                     }
                     SwarmEvent::IncomingConnection { .. } => {
-                        println!("📥 Входящее соединение...");
+                        logln!(self, "📥 Входящее соединение...");
                     }
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         for relay in relays.clone() {
                             if relay.contains(&peer_id.to_string()) {
                                 // swarm.dial(Multiaddr::from_str(&relay).unwrap()).unwrap();
-                                println!("⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
+                                logln!(self, "⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
                             }
                         }
                     }
                     SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {
-                            println!("mDNS discovered a new peer: {peer_id}");
+                            logln!(self, "mDNS discovered a new peer: {peer_id}");
                             swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
                         for (peer_id, _multiaddr) in list {
-                            println!("mDNS discover peer has expired: {peer_id}");
+                            logln!(self, "mDNS discover peer has expired: {peer_id}");
                             swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         }
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted {
                         .. 
                     })) => {
-                        println!("📡 Реле подключилось");
+                        logln!(self, "📡 Реле подключилось");
                         let ext_addresses: Vec<Multiaddr> =  swarm.external_addresses().cloned().collect();
                         let behaviour = swarm.behaviour_mut();
                         for ext in ext_addresses {
                             behaviour.kademilia.add_address(&local_peer_id, ext.clone());
-                            println!("📡 Kademlia record {}:{}", &local_peer_id, &ext.clone().to_string());
+                            logln!(self, "📡 Kademlia record {}:{}", &local_peer_id, &ext.clone().to_string());
                         }
                     }
                     SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(gossipsub::Event::Message {
@@ -310,7 +312,7 @@ impl  P2PEngine {
                         message,
                     })) => {
                         let message_data = String::from_utf8_lossy(&message.data);
-                        println!("Got message: '{message_data}' with id: {id} from peer: {peer_id}");
+                        logln!(self, "Got message: '{message_data}' with id: {id} from peer: {peer_id}");
 
                         // send user message to any other subscriber
                         self.broadcast.on_network_room_message(ChatMessage {
@@ -319,17 +321,17 @@ impl  P2PEngine {
                         });
                     }
                     SwarmEvent::Behaviour(MyBehaviourEvent::Autonat(autonat::Event::StatusChanged { old, new })) => {
-                        println!("🌐 Статус NAT изменился: {:?} -> {:?}", old, new);
+                        logln!(self, "🌐 Статус NAT изменился: {:?} -> {:?}", old, new);
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::Dcutr(event)) => {
-                        println!("🛠️ DCUtR Event: {:?}", event);
+                        logln!(self, "🛠️ DCUtR Event: {:?}", event);
                     }
                     SwarmEvent::Behaviour(MyBehaviourEvent::Identify(identify::Event::Received { peer_id, info })) => {
                         for relay_addr in relays.clone() {
                             if relay_addr.contains(&peer_id.to_string()) {
-                                println!("🛠 Протоколы реле: {:?}", peer_id);
+                                logln!(self, "🛠 Протоколы реле: {:?}", peer_id);
                                 for p in info.protocols.iter() {
-                                    println!("🚀 {}", p)
+                                    logln!(self, "🚀 {}", p)
                                 }
                             }
                         }
@@ -341,18 +343,18 @@ impl  P2PEngine {
                                     kad::GetProvidersOk::FoundProviders { providers, .. } => {
                                         for peer_id in providers {
                                             if peer_id != local_peer_id {
-                                                println!("📍 Нашел провайдера: {peer_id}. Пробую Dial...");
+                                                logln!(self, "📍 Нашел провайдера: {peer_id}. Пробую Dial...");
                                                 let _ = swarm.dial(peer_id);
                                             }
                                         }
                                     },
                                     _ => {
-                                        println!("🏁 Поиск завершен");
+                                        logln!(self, "🏁 Поиск завершен");
                                     }
                                 }
                             }
                             _ => {
-                                println!("=== KAD PROGRESS: {:?} ===", result);
+                                logln!(self, "=== KAD PROGRESS: {:?} ===", result);
                             }
                         }
                     }
@@ -376,23 +378,23 @@ impl  P2PEngine {
 
                     // for (_, topics) in behaviour.gossipsub.all_peers() {
                     //     for topic in topics {
-                    //         println!("Topic: {}", topic);
+                    //         logln!(self, "Topic: {}", topic);
                     //     }
                     // }
 
                     // 3. Общее кол-во активных соединений Swarm
                     let active_connections = swarm.network_info().num_peers();
 
-                    println!("--- 📊 СТАТИСТИКА НОДЫ ---");
-                    println!("🌐 Соединений (Swarm)      : {}", active_connections);
-                    println!("📚 В таблице (Kademlia)    : {}", total_kad_peers);
-                    println!("💬 В сети (Gossipsub)      : {}", gossip_peers);
-                    println!("💬 В комнате (guardi-vpn)  : {}", room_peers);
-                    println!("--------------------------");
+                    logln!(self, "--- 📊 СТАТИСТИКА НОДЫ ---");
+                    logln!(self, "🌐 Соединений (Swarm)      : {}", active_connections);
+                    logln!(self, "📚 В таблице (Kademlia)    : {}", total_kad_peers);
+                    logln!(self, "💬 В сети (Gossipsub)      : {}", gossip_peers);
+                    logln!(self, "💬 В комнате (guardi-vpn)  : {}", room_peers);
+                    logln!(self, "--------------------------");
                     let ext_addresses: Vec<&Multiaddr> = swarm.external_addresses().collect();
                     let ext_addresses_count = ext_addresses.len();
                     for ex in ext_addresses {
-                        println!("📡 Active Relay {ex}");
+                        logln!(self, "📡 Active Relay {ex}");
                     }
 
                     // send stats to any other subscriber

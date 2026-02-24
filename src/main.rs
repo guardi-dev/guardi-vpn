@@ -9,7 +9,7 @@ async fn main() {
     let p2p_thread = p2p.clone();
     
     tokio::spawn(async move {
-        // let _ = p2p_thread.listen().await;
+        let _ = p2p_thread.listen().await;
     });
 
     // === TERMINAL ===

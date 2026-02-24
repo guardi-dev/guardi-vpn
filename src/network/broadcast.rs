@@ -1,4 +1,11 @@
+use std::fmt;
+
 use tokio::sync::broadcast;
+
+#[derive(Clone, Debug)]
+pub struct LogMessage {
+    pub content: String,
+}
 
 // 1. Декларируем конкретные типы данных (наши "события")
 #[derive(Clone, Debug)]
@@ -23,6 +30,7 @@ pub struct StatsMessage {
 // 2. Объединяем их в один "Union" (EngineEvent)
 #[derive(Clone, Debug)]
 pub enum EngineEvent {
+    Log(LogMessage),
     User(UserMessage),
     Chat(ChatMessage),      // Теперь это четкая ссылка на структуру
 	Stats(StatsMessage)
@@ -55,6 +63,14 @@ impl P2PBroadcast {
     }
 
 	// === P2P MESSAGES ===
+    pub fn logln (&self, args: fmt::Arguments) {
+        let log = fmt::format(args);
+        // === DEBUG ===
+        // println!("{log}");
+        let event = EngineEvent::Log(LogMessage { content: log });
+        let _ = self.tx.send(event);
+    }
+
 	pub fn on_stats (&self, message: StatsMessage) {
 		let event = EngineEvent::Stats(message);
         let _ = self.tx.send(event);
@@ -64,4 +80,11 @@ impl P2PBroadcast {
         let event = EngineEvent::Chat(message);
         let _ = self.tx.send(event);
     }
+}
+
+#[macro_export]
+macro_rules! logln {
+    ($self:ident, $($arg:tt)*) => {
+        $self.broadcast.logln(format_args!($($arg)*))
+    };
 }
