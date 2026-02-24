@@ -2,6 +2,11 @@ use tokio::sync::broadcast;
 
 // 1. Декларируем конкретные типы данных (наши "события")
 #[derive(Clone, Debug)]
+pub struct UserMessage {
+    pub content: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct ChatMessage {
     pub sender: String,
     pub content: String,
@@ -18,6 +23,7 @@ pub struct StatsMessage {
 // 2. Объединяем их в один "Union" (EngineEvent)
 #[derive(Clone, Debug)]
 pub enum EngineEvent {
+    User(UserMessage),
     Chat(ChatMessage),      // Теперь это четкая ссылка на структуру
 	Stats(StatsMessage)
 }
@@ -38,6 +44,14 @@ impl P2PBroadcast {
     // Метод для подписки: возвращает "приемник"
     pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {
         self.tx.subscribe()
+    }
+
+    // === Subscriber MESSAGES ===
+    pub fn send_message (&self, message: String) {
+        let event = EngineEvent::User(UserMessage {
+            content: message.clone()
+        });
+        let _ = self.tx.send(event);
     }
 
 	// === P2P MESSAGES ===

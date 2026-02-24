@@ -1,4 +1,3 @@
-use color_eyre::Result;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Constraint, Layout, Position},
@@ -7,6 +6,7 @@ use ratatui::{
     widgets::{Block, List, ListItem, Paragraph},
     DefaultTerminal, Frame,
 };
+use crate::network::broadcast::{self, P2PBroadcast};
 
 /// App holds the state of the application
 pub struct App {
@@ -94,26 +94,41 @@ impl App {
     }
 
     fn submit_message(&mut self) {
-        self.messages.push(self.input.clone());
+        // self.messages.push(self.input.clone());
         self.input.clear();
         self.reset_cursor();
     }
 
-	pub fn default () -> Result<()> {
-		color_eyre::install()?;
+	pub async fn default () {
+		color_eyre::install().unwrap();
 		let terminal = ratatui::init();
-		let app_result = App::new().run(terminal);
+		let broadcast = P2PBroadcast::new();
+		let _ = App::new().run(terminal, broadcast).await;
 		App::restore();
-		app_result
 	}
 
 	pub fn restore () {
 		ratatui::restore();
 	}
 
-    pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+    pub async fn run(mut self, mut terminal: DefaultTerminal, broadcast: P2PBroadcast) -> Result<(), anyhow::Error> {
+		let mut tx = broadcast.subscribe();
+
         loop {
+			tokio::select! {
+				event = tx.recv() => {
+					match event {
+						Ok(broadcast::EngineEvent::Chat(msg)) => {
+							let user_message = format!("[{}] {}", msg.sender, msg.content);
+							self.messages.push(user_message);
+						}
+						_ => {}
+					}
+				}
+			}
+
             terminal.draw(|frame| self.draw(frame))?;
+
 
             if let Event::Key(key) = event::read()? {
                 match self.input_mode {
@@ -127,7 +142,11 @@ impl App {
                         _ => {}
                     },
                     InputMode::Editing if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Enter => self.submit_message(),
+                        KeyCode::Enter => {
+							// send message to p2p subscribers
+							broadcast.send_message(self.input.clone());
+							self.submit_message();
+						},
                         KeyCode::Char(to_insert) => self.enter_char(to_insert),
                         KeyCode::Backspace => self.delete_char(),
                         KeyCode::Left => self.move_cursor_left(),

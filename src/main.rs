@@ -15,17 +15,16 @@ async fn main() -> Result<()> {
     let mut tx = p2p.broadcast.subscribe();
 
     // === TERMINAL ===
-    App::default()
 
-    // loop {
-    //     // if p2p_handle.is_finished() {
-    //     //     println!("P2P Engine is down, exit!");
-    //     //     exit(1);
-    //     // }
-    //     // tokio::select! {
-    //     //     event = tx.recv() => {
-    //     //         println!("P2P Event {:?}", event);
-    //     //     }
-    //     // }
-    // }
+    loop {
+        // if p2p_handle.is_finished() {
+        //     println!("P2P Engine is down, exit!");
+        //     exit(1);
+        // }
+        // tokio::select! {
+        //     event = tx.recv() => {
+        //         println!("P2P Event {:?}", event);
+        //     }
+        // }
+    }
 }

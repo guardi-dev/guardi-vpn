@@ -10,7 +10,7 @@ use tokio::{io, io::AsyncBufReadExt, select};
 use tracing_subscriber::{EnvFilter};
 use kad::store::MemoryStore;
 
-use crate::network::broadcast::{ChatMessage, P2PBroadcast, StatsMessage};
+use crate::network::broadcast::{ChatMessage, P2PBroadcast, StatsMessage, EngineEvent};
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
@@ -211,6 +211,7 @@ impl  P2PEngine {
 
         let mut last_provisioning = tokio::time::interval(std::time::Duration::from_mins(1));
 
+        let mut tx = self.broadcast.subscribe();
         // === WRITE SOME FUNCTIONS HERE 
 
         loop {
@@ -227,6 +228,16 @@ impl  P2PEngine {
                         .behaviour_mut().gossipsub
                         .publish(topic.clone(), line.as_bytes()) {
                         println!("Publish error: {e:?}");
+                    }
+                }
+                tx_event = tx.recv() => {
+                    match tx_event {
+                        Ok(EngineEvent::User(msg)) => {
+                            let behaviour = swarm.behaviour_mut();
+                            let res = behaviour.gossipsub.publish(topic.clone(), msg.content);
+                            let _ = res.inspect_err(|e| eprintln!("Invalid publish: {e}"));
+                        }
+                        _ => {}
                     }
                 }
                 event = swarm.select_next_some() => match event {
@@ -351,8 +362,6 @@ impl  P2PEngine {
                     // clearscreen::clear().expect("failed to clear screen");
 
                     let behaviour = swarm.behaviour_mut();
-                    let res = behaviour.gossipsub.publish(topic.clone(), format!("Hello world {}", rand::random::<u8>()));
-                    let _ = res.inspect_err(|e| eprintln!("Invalid publish: {e}"));
 
                     // 1. Статистика Кадемлии (сколько пиров мы ЗНАЕМ)
                     let mut total_kad_peers = 0;
