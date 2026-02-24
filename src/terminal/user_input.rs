@@ -1,8 +1,8 @@
 use ratatui::{
-    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Constraint, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
+    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Alignment, Constraint, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
 };
 use crossterm::event::{EventStream};
-use crate::network::broadcast::{P2PBroadcast, EngineEvent};
+use crate::network::broadcast::{EngineEvent, P2PBroadcast, StatsMessage};
 use futures_util::StreamExt; // Важно для метода .next()
 use strum::{Display, EnumCount, EnumIter, FromRepr, IntoEnumIterator};
 
@@ -17,13 +17,12 @@ enum SelectedTab {
 
 /// App holds the state of the application
 pub struct App {
-    /// Current value of the input box
     input: String,
-    /// Position of cursor in the editor area.
+
     character_index: usize,
-    /// Current input mode
+
     input_mode: InputMode,
-    /// History of recorded messages
+    
     messages: Vec<String>,
 
     selected_tab: SelectedTab,
@@ -31,8 +30,12 @@ pub struct App {
     logs: Vec<String>,
 
     list_state: ListState,
+    
     scroll_state: ScrollbarState,
-    auto_scroll: bool
+    
+    auto_scroll: bool,
+
+    stats: StatsMessage
 }
 
 const MAX_LOGS: u32 = 1000;
@@ -52,7 +55,13 @@ impl App {
             selected_tab: SelectedTab::Chat,
             list_state: ListState::default(),
             scroll_state: ScrollbarState::default(),
-            auto_scroll: true
+            auto_scroll: true,
+            stats: StatsMessage { 
+                room_count: 0, 
+                kademlia_count: 0, 
+                gosibsub_count: 0, 
+                active_ralays_count: 0 
+            }
         }
     }
 
@@ -201,17 +210,20 @@ impl App {
                     }
 				}
 				
-				event = tx.recv() => {
+				Ok(event) = tx.recv() => {
 					match event {
-						Ok(EngineEvent::Chat(msg)) => {
+						EngineEvent::Chat(msg) => {
 							let user_message = format!("[{}] {}", msg.sender, msg.content);
 							self.messages.push(user_message);
 						}
-                        Ok(EngineEvent::Log(msg)) => {
+                        EngineEvent::Log(msg) => {
                             self.logs.push(msg.content);
                             if self.logs.len() > MAX_LOGS.try_into().unwrap() {
                                 self.logs.remove(0);
                             }
+                        }
+                        EngineEvent::Stats(msg) => {
+                            self.stats = msg;
                         }
 						_ => {}
 					}
@@ -228,11 +240,21 @@ impl App {
 
         // === LAYOUT ===
         let rows = Layout::vertical([Length(1), Min(0), Length(1)]);
-        let header_row = Layout::horizontal([Min(0), Length(20)]);
+        let header_row = Layout::horizontal([Min(0), Min(0)]);
         let [header_area, inner_area, footer_area] = rows.areas(area);
         let [tabs_area, title_area] = header_row.areas(header_area);
 
-        render_title(title_area, buf);
+        // === TITLE ===
+        Line::raw(format!(
+            "Guardi VPN 📚:{} 🌐:{} 📡:{} 💬:{}", 
+            self.stats.kademlia_count, 
+            self.stats.gosibsub_count,
+            self.stats.active_ralays_count,
+            self.stats.room_count
+        ))
+            .alignment(Alignment::Right)
+            .bold()
+            .render(title_area, buf);
 
         // === RENDER TABS === 
         let titles = SelectedTab::iter().map(|t| t.title());
@@ -320,10 +342,6 @@ impl SelectedTab {
             Self::Logs => tailwind::EMERALD,
         }
     }
-}
-
-fn render_title(area: Rect, buf: &mut Buffer) {
-    "Guardi VPN".bold().render(area, buf);
 }
 
 fn render_footer(area: Rect, buf: &mut Buffer) {
