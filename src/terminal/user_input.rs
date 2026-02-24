@@ -1,14 +1,21 @@
+use color_eyre::owo_colors::Style;
 use ratatui::{
-    crossterm::event::{Event, KeyCode, KeyEventKind},
-    layout::{Constraint, Layout, Position},
-    style::{Color, Modifier, Style, Stylize},
-    text::{Line, Span, Text},
-    widgets::{Block, List, ListItem, Paragraph},
-    DefaultTerminal, Frame,
+    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Constraint, Layout, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line}, widgets::{Block, Padding, Paragraph, Tabs, Widget}
 };
 use crossterm::event::{EventStream};
 use crate::network::broadcast::{P2PBroadcast, EngineEvent};
 use futures_util::StreamExt; // Важно для метода .next()
+use strum::{Display, EnumCount, EnumIter, FromRepr, IntoEnumIterator};
+
+#[derive(Default, Clone, Copy, Display, FromRepr, EnumIter, EnumCount)]
+enum SelectedTab {
+    #[default]
+    #[strum(to_string = "Chat")]
+    Chat,
+    #[strum(to_string = "Logs")]        
+    Logs,
+}
+
 /// App holds the state of the application
 pub struct App {
     /// Current value of the input box
@@ -19,7 +26,10 @@ pub struct App {
     input_mode: InputMode,
     /// History of recorded messages
     messages: Vec<String>,
+
+    selected_tab: SelectedTab
 }
+
 
 enum InputMode {
     Normal,
@@ -33,6 +43,7 @@ impl App {
             input_mode: InputMode::Normal,
             messages: Vec::new(),
             character_index: 0,
+            selected_tab: SelectedTab::Chat
         }
     }
 
@@ -119,6 +130,10 @@ impl App {
 		ratatui::restore();
 	}
 
+    pub fn next_tab(&mut self) {
+        self.selected_tab = self.selected_tab.next();
+    }
+
     pub async fn run(mut self, mut terminal: DefaultTerminal, broadcast: &P2PBroadcast) -> Result<(), anyhow::Error> {
 		let mut tx = broadcast.subscribe();
 		let mut reader = EventStream::new();
@@ -130,36 +145,28 @@ impl App {
 				biased;
 
 				key = reader.next() => {
-					match key {
-						Some(Ok(Event::Key(key))) => {
-							match self.input_mode {
-								InputMode::Normal => match key.code {
-									KeyCode::Char('e') => {
-										self.input_mode = InputMode::Editing;
-									}
-									KeyCode::Char('q') => {
-										return Ok(());
-									}
-									_ => {}
-								},
-								InputMode::Editing if key.kind == KeyEventKind::Press => match key.code {
-									KeyCode::Enter => {
-										// send message to p2p subscribers
-										broadcast.send_message(self.input.clone());
-										self.submit_message();
-									},
-									KeyCode::Char(to_insert) => self.enter_char(to_insert),
-									KeyCode::Backspace => self.delete_char(),
-									KeyCode::Left => self.move_cursor_left(),
-									KeyCode::Right => self.move_cursor_right(),
-									KeyCode::Esc => self.input_mode = InputMode::Normal,
-									_ => {}
-								},
-								InputMode::Editing => {}
-							}
-						}
-						_ => {}
-					}
+                    match key {
+                        Some(Ok(Event::Key(key))) => {
+                            match key.code {
+                                KeyCode::Char('q') => {
+                                    return Ok(());
+                                }
+                                KeyCode::Enter => {
+                                    // send message to p2p subscribers
+                                    broadcast.send_message(self.input.clone());
+                                    self.submit_message();
+                                },
+                                KeyCode::Tab => self.next_tab(),
+                                KeyCode::Char(to_insert) => self.enter_char(to_insert),
+                                KeyCode::Backspace => self.delete_char(),
+                                KeyCode::Left => self.move_cursor_left(),
+                                KeyCode::Right => self.move_cursor_right(),
+                                KeyCode::Esc => self.input_mode = InputMode::Normal,
+                                _ => {}
+                            }
+                        },
+                        _ => {}
+                    }
 				}
 				
 				event = tx.recv() => {
@@ -176,72 +183,81 @@ impl App {
     }
 
     fn draw(&self, frame: &mut Frame) {
-        let vertical = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Min(1),
-        ]);
-        let [help_area, input_area, messages_area] = vertical.areas(frame.area());
+        use Constraint::{Length, Min};
 
-        let (msg, style) = match self.input_mode {
-            InputMode::Normal => (
-                vec![
-                    "Press ".into(),
-                    "q".bold(),
-                    " to exit, ".into(),
-                    "e".bold(),
-                    " to start editing.".bold(),
-                ],
-                Style::default().add_modifier(Modifier::RAPID_BLINK),
-            ),
-            InputMode::Editing => (
-                vec![
-                    "Press ".into(),
-                    "Esc".bold(),
-                    " to stop editing, ".into(),
-                    "Enter".bold(),
-                    " to record the message".into(),
-                ],
-                Style::default(),
-            ),
-        };
-        let text = Text::from(Line::from(msg)).patch_style(style);
-        let help_message = Paragraph::new(text);
-        frame.render_widget(help_message, help_area);
+        let area = frame.area();
+        let buf = frame.buffer_mut();
 
-        let input = Paragraph::new(self.input.as_str())
-            .style(match self.input_mode {
-                InputMode::Normal => Style::default(),
-                InputMode::Editing => Style::default().fg(Color::Yellow),
-            })
-            .block(Block::bordered().title("Input"));
-        frame.render_widget(input, input_area);
-        match self.input_mode {
-            // Hide the cursor. `Frame` does this by default, so we don't need to do anything here
-            InputMode::Normal => {}
+        // === LAYOUT ===
+        let vertical = Layout::vertical([Length(1), Min(0), Length(1)]);
+        let horizontal = Layout::horizontal([Min(0), Length(20)]);
+        let [header_area, inner_area, footer_area] = vertical.areas(area);
+        let [tabs_area, title_area] = horizontal.areas(header_area);
 
-            // Make the cursor visible and ask ratatui to put it at the specified coordinates after
-            // rendering
-            #[allow(clippy::cast_possible_truncation)]
-            InputMode::Editing => frame.set_cursor_position(Position::new(
-                // Draw the cursor at the current position in the input field.
-                // This position is can be controlled via the left and right arrow key
-                input_area.x + self.character_index as u16 + 1,
-                // Move one line down, from the border to the input line
-                input_area.y + 1,
-            )),
-        }
+        render_title(title_area, buf);
 
-        let messages: Vec<ListItem> = self
-            .messages
-            .iter()
-            .enumerate()
-            .map(|(i, m)| {
-                let content = Line::from(Span::raw(format!("{i}: {m}")));
-                ListItem::new(content)
-            })
-            .collect();
-        let messages = List::new(messages).block(Block::bordered().title("Messages"));
-        frame.render_widget(messages, messages_area);
+        // === RENDER TABS === 
+        let titles = SelectedTab::iter().map(|t| t.title());
+        let highlight_style = (Color::default(), self.selected_tab.palette().c700);
+        let selected_tab_index = self.selected_tab as usize;
+        Tabs::new(titles)
+            .highlight_style(highlight_style)
+            .select(selected_tab_index)
+            .padding("", "")
+            .divider(" ")
+            .bold()
+            .render(area, buf);
+
+        Paragraph::new("Hellow World")
+            .block(Block::bordered()
+                .border_set(symbols::border::PROPORTIONAL_TALL)
+                .padding(Padding::horizontal(1))
+                .border_style(self.selected_tab.palette().c700))
+            .render(inner_area, buf);
+
+        render_footer(footer_area, buf);    
     }
+}
+
+impl SelectedTab {
+    /// Get the next tab, if there is no next tab return the current tab.
+    fn next(self) -> Self {
+        let current_index = self as usize;
+        let mut next_index = current_index.saturating_add(1);
+        if current_index == SelectedTab::COUNT - 1 {
+            next_index = 0;
+        }
+        Self::from_repr(next_index).unwrap_or(self)
+    }
+
+    fn tab_to_title (self: &SelectedTab) -> &str {
+        match self {
+            SelectedTab::Chat => "Chat",
+            SelectedTab::Logs => "Logs"
+        }
+    }
+
+    fn title(self) -> Line<'static> {
+        format!("  {self}  ")
+            .fg(tailwind::SLATE.c200)
+            .bg(self.palette().c900)
+            .into()
+    }
+
+    const fn palette(self) -> tailwind::Palette {
+        match self {
+            Self::Chat => tailwind::BLUE,
+            Self::Logs => tailwind::EMERALD,
+        }
+    }
+}
+
+fn render_title(area: Rect, buf: &mut Buffer) {
+    "Guardi VPN".bold().render(area, buf);
+}
+
+fn render_footer(area: Rect, buf: &mut Buffer) {
+    Line::raw("Press 'Tab' change to next tab | Press 'Q' to quit")
+        .centered()
+        .render(area, buf);
 }

@@ -67,8 +67,8 @@ impl P2PBroadcast {
         let log = fmt::format(args);
         // === DEBUG ===
         // println!("{log}");
-        // let event = EngineEvent::Log(LogMessage { content: log });
-        // let _ = self.tx.send(event);
+        let event = EngineEvent::Log(LogMessage { content: log });
+        let _ = self.tx.send(event);
     }
 
 	pub fn on_stats (&self, message: StatsMessage) {
