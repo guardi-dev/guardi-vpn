@@ -1,5 +1,5 @@
 use ratatui::{
-    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Constraint, Layout, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, Padding, Paragraph, Tabs, Widget}
+    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Constraint, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
 };
 use crossterm::event::{EventStream};
 use crate::network::broadcast::{P2PBroadcast, EngineEvent};
@@ -29,6 +29,10 @@ pub struct App {
     selected_tab: SelectedTab,
 
     logs: Vec<String>,
+
+    list_state: ListState,
+    scroll_state: ScrollbarState,
+    auto_scroll: bool
 }
 
 const MAX_LOGS: u32 = 1000;
@@ -45,7 +49,10 @@ impl App {
             messages: Vec::new(),
             logs: Vec::new(),
             character_index: 0,
-            selected_tab: SelectedTab::Chat
+            selected_tab: SelectedTab::Chat,
+            list_state: ListState::default(),
+            scroll_state: ScrollbarState::default(),
+            auto_scroll: true
         }
     }
 
@@ -153,6 +160,16 @@ impl App {
                                 KeyCode::Char('q') => {
                                     return Ok(());
                                 }
+                                KeyCode::Down => {
+                                    self.auto_scroll = true;
+                                    self.scroll_state.next();
+                                    self.list_state.scroll_down_by(1);
+                                }
+                                KeyCode::Up => {
+                                    self.auto_scroll = false;
+                                    self.scroll_state.prev();
+                                    self.list_state.scroll_up_by(1);
+                                }
                                 KeyCode::Enter => {
                                     // send message to p2p subscribers
                                     broadcast.send_message(self.input.clone());
@@ -190,7 +207,7 @@ impl App {
         }
     }
 
-    fn draw(&self, frame: &mut Frame) {
+    fn draw(&mut self, frame: &mut Frame) {
         use Constraint::{Length, Min};
 
         let area = frame.area();
@@ -231,9 +248,27 @@ impl App {
                         ListItem::new(content)
                     })
                     .collect();
-                List::new(logs)
-                    .block(Block::bordered())
-                    .render(inner_area, buf);
+
+                let scroll = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(Some("↑"))
+                    .end_symbol(Some("↓"));
+
+                self.scroll_state = self.scroll_state.content_length(logs.clone().len());
+                if self.auto_scroll {
+                    self.scroll_state.last();
+                    self.list_state.select_last();
+                }
+
+                let list = List::new(logs.clone())
+                    .block(Block::bordered());
+
+                let scroll_render = inner_area.inner(Margin {
+                    vertical: 0,
+                    horizontal: 1
+                });
+
+                StatefulWidget::render(list, scroll_render, buf, &mut self.list_state);
+                StatefulWidget::render(scroll, scroll_render, buf, &mut self.scroll_state);
             }
         }
         
@@ -280,7 +315,7 @@ fn render_title(area: Rect, buf: &mut Buffer) {
 }
 
 fn render_footer(area: Rect, buf: &mut Buffer) {
-    Line::raw("Press 'Tab' change to next tab | Press 'Q' to quit")
+    Line::raw("Press 'Tab' change to next tab | Press 'Q' to quit | ▲ ▼ to scroll")
         .centered()
         .render(area, buf);
 }
