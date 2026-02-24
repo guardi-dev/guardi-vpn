@@ -189,10 +189,10 @@ impl App {
         let buf = frame.buffer_mut();
 
         // === LAYOUT ===
-        let vertical = Layout::vertical([Length(1), Min(0), Length(1)]);
-        let horizontal = Layout::horizontal([Min(0), Length(20)]);
-        let [header_area, inner_area, footer_area] = vertical.areas(area);
-        let [tabs_area, title_area] = horizontal.areas(header_area);
+        let rows = Layout::vertical([Length(1), Min(0), Length(1)]);
+        let header_row = Layout::horizontal([Min(0), Length(20)]);
+        let [header_area, inner_area, footer_area] = rows.areas(area);
+        let [tabs_area, title_area] = header_row.areas(header_area);
 
         render_title(title_area, buf);
 
@@ -206,15 +206,28 @@ impl App {
             .padding("", "")
             .divider(" ")
             .bold()
-            .render(area, buf);
+            .render(tabs_area, buf);
 
-        Paragraph::new("Hellow World")
+        // == TAB BODY ===
+        match self.selected_tab {
+            SelectedTab::Chat => {
+                Paragraph::new(format!(" {} ", self.input.as_str()))
+                    .block(Block::bordered().title("Input"))
+                    .render(inner_area, buf);
+            },
+            SelectedTab::Logs => {
+
+            }
+        }
+        
+        Paragraph::new("")
             .block(Block::bordered()
                 .border_set(symbols::border::PROPORTIONAL_TALL)
                 .padding(Padding::horizontal(1))
                 .border_style(self.selected_tab.palette().c700))
             .render(inner_area, buf);
 
+        // === FOOTER ===
         render_footer(footer_area, buf);    
     }
 }
@@ -228,13 +241,6 @@ impl SelectedTab {
             next_index = 0;
         }
         Self::from_repr(next_index).unwrap_or(self)
-    }
-
-    fn tab_to_title (self: &SelectedTab) -> &str {
-        match self {
-            SelectedTab::Chat => "Chat",
-            SelectedTab::Logs => "Logs"
-        }
     }
 
     fn title(self) -> Line<'static> {
