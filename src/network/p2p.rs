@@ -28,7 +28,7 @@ struct MyBehaviour {
     dcutr: dcutr::Behaviour
 }
 
-const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/guardi-vpn/kad/0.0.1");
+const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 
 pub struct P2PEngine {
     pub broadcast: P2PBroadcast
@@ -124,7 +124,7 @@ impl  P2PEngine {
                 let ping = ping::Behaviour::new(ping_config);
                 
                 let identify_config = identify::Config::new(
-                    "/ipfs/id/1.0.0".to_string(),
+                    IPFS_PROTO_NAME.to_string(),
                     key.public(),
                 ).with_push_listen_addr_updates(true);
                 let identify = identify::Behaviour::new(identify_config);
@@ -319,6 +319,7 @@ impl  P2PEngine {
                         let behaviour = swarm.behaviour_mut();
                         for ext in ext_addresses {
                             behaviour.kademilia.add_address(&local_peer_id, ext.clone());
+                            behaviour.kademilia.bootstrap().expect("Can't bootstrat kademilia");
                             logln!(self, "📡 Kademlia record {}:{}", &local_peer_id, &ext.clone().to_string());
                         }
                     }
