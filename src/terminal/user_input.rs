@@ -1,7 +1,7 @@
 use ratatui::{
     DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Alignment, Constraint::{self, Fill, Length, Max, Min, Percentage, Ratio}, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
 };
-use crossterm::event::{EventStream};
+use crossterm::event::{EventStream, KeyEventKind, KeyModifiers};
 use uuid::Uuid;
 use crate::network::broadcast::{ChatMessage, EngineEvent, P2PBroadcast, StatsMessage};
 use futures_util::StreamExt; // Важно для метода .next()
@@ -183,10 +183,12 @@ impl App {
 				key = reader.next() => {
                     match key {
                         Some(Ok(Event::Key(key))) => {
-                            match key.code {
-                                KeyCode::Char('q') => {
-                                    return Ok(());
-                                }
+                            match (key.modifiers, key.code) {
+                                (KeyModifiers::CONTROL, KeyCode::Char('q')) => { return Ok(()) }
+                                (_, KeyCode::Esc) => return Ok(()),
+                                _ => {}
+                            }
+                            if key.kind == KeyEventKind::Press { match key.code {
                                 KeyCode::Down => {
                                     self.scroll_down();
                                 }
@@ -205,7 +207,7 @@ impl App {
                                 KeyCode::Right => self.move_cursor_right(),
                                 KeyCode::Esc => self.input_mode = InputMode::Normal,
                                 _ => {}
-                            }
+                            }}
                         },
                         _ => {}
                     }
@@ -383,7 +385,7 @@ impl SelectedTab {
 }
 
 fn render_footer(area: Rect, buf: &mut Buffer) {
-    Line::raw("Press 'Tab' change to next tab | Press 'Q' to quit | ▲ ▼ to scroll")
+    Line::raw("Press 'Tab' change to next tab | Press 'Ctrl+Q' or 'Esc' to quit | ▲ ▼ to scroll")
         .centered()
         .render(area, buf);
 }
