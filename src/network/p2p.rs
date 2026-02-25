@@ -1,10 +1,10 @@
 use std::{
-    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, str::FromStr, time::Duration
+    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::{Ipv4Addr}, str::FromStr, time::Duration
 };
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, Swarm, TransportError, autonat, core::transport::ListenerId, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, upnp, yamux
+    Multiaddr, PeerId, StreamProtocol, Swarm, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, upnp, yamux
 };
 use tokio::{io, select};
 use tracing_subscriber::{EnvFilter};
@@ -42,21 +42,32 @@ impl  P2PEngine {
         }
     }
 
-    fn listen_relay (&self, addr: &String, swarm: &mut Swarm<MyBehaviour>) -> Result<ListenerId, TransportError<std::io::Error>> {
+    fn is_public(ip_str: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let ip = Ipv4Addr::from_str(ip_str)?;
+        // Адрес белый, если он НЕ частный, НЕ петлевой, НЕ линк-локал и т.д.
+        Ok(!(ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_multicast()))
+    }
+
+    fn listen_relay (&self, addr: &String, swarm: &mut Swarm<MyBehaviour>) -> Result<(), Box<dyn std::error::Error>> {
         let relay_arr: Vec<&str> = addr.split("/p2p/").collect();
-        let relay_addr = Multiaddr::from_str(relay_arr[0]).unwrap();
-        let relay_peer_id = PeerId::from_str(relay_arr[1]).unwrap();
+        let relay_parts: Vec<&str> = addr.split("/").collect();
+        let relay_proto = relay_parts[1];
+        let is_public = P2PEngine::is_public(relay_parts[2])?;
+        if !(is_public && relay_proto == "ip4") {
+            return Err("Invalid Relay public address".into());
+        }
+
+        let relay_addr = Multiaddr::from_str(relay_arr[0])?;
+        let relay_peer_id = PeerId::from_str(relay_arr[1])?;
 
         let target = relay_addr.clone()
             .with(Protocol::P2p(relay_peer_id))
             .with(Protocol::P2pCircuit);
 
         // swarm.dial(Multiaddr::from_str(&relay_str).unwrap()).unwrap();
-        let res = swarm.listen_on(target.clone());
-        if res.is_ok() {
-            logln!(self, "📡 Subscribe to relays {}", addr);
-        }
-        res
+        swarm.listen_on(target.clone())?;
+        logln!(self, "📡 Subscribe to relays {}", addr);
+        Ok(())
     }
 
     pub async fn listen(&self) -> Result<(), Box<dyn Error>> {
