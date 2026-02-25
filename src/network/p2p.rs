@@ -259,26 +259,131 @@ impl  P2PEngine {
                     }
                 }
                 event = swarm.select_next_some() => match event {
-                    // 1. Ошибка самого транспорта (DNS, TCP, WS)
-                    // SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                        // logln!(self, "❌ Ошибка исходящего соединения к {:?}: {:?}", peer_id, error);
-                    // },
-                    // 2. Ошибка на уровне протоколов (например, не договорились по Noise или Yamux)
-                    // SwarmEvent::IncomingConnectionError { send_back_addr, error, .. } => {
-                        // logln!(self, "❌ Ошибка входящего соединения с {}: {:?}", send_back_addr, error);
-                    // },
-                    // 3. Если адрес невалидный или не поддерживается транспортом
-                    // SwarmEvent::Dialing { peer_id, .. } => {
-                        // logln!(self, "🔌 Пытаюсь дозвониться до {:?}...", peer_id);
-                    // },
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::NewExternalAddr(external_addr))) => {
-                        logln!(self, "New external address: {external_addr}");
-                    }
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::GatewayNotFound)) => {
-                        logln!(self, "Gateway does not support UPnP");
-                    }
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Upnp(upnp::Event::NonRoutableGateway)) => {
-                        logln!(self, "Gateway is not exposed directly to the public Internet, i.e. it itself has a private IP address.");
+                    SwarmEvent::Behaviour(my_behaviour) => {
+                        match my_behaviour {
+                            MyBehaviourEvent::Kademilia(kad) => {
+                                match kad {
+                                    kad::Event::RoutablePeer { peer, address } => {
+                                        if peer == local_peer_id {
+                                            continue;
+                                        }
+                                        self.listen_relay(&address.to_string(), &mut swarm)?;
+                                        logln!(self, "📡 Try Relay {address}");
+                                    }
+                                    kad::Event::OutboundQueryProgressed { result, .. } => {
+                                        match result {
+                                            kad::QueryResult::GetProviders(Ok(ok)) => {
+                                                match ok {
+                                                    kad::GetProvidersOk::FoundProviders { providers, .. } => {
+                                                        for peer_id in providers {
+                                                            if peer_id != local_peer_id {
+                                                                logln!(self, "📍 Нашел провайдера: {peer_id}. Пробую Dial...");
+                                                                let _ = swarm.dial(peer_id);
+                                                            }
+                                                        }
+                                                    },
+                                                    _ => {
+                                                        logln!(self, "🏁 Поиск завершен");
+                                                    }
+                                                }
+                                            }
+                                            _ => {
+                                                logln!(self, "=== KAD PROGRESS: {:?} ===", result);
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            MyBehaviourEvent::Gossipsub(gossipsub) => {
+                                match gossipsub {
+                                    gossipsub::Event::Message {
+                                        propagation_source: peer_id,
+                                        message,
+                                        ..
+                                    } => {
+                                        let message_data = String::from_utf8_lossy(&message.data);
+                                        logln!(self, "Got message: '{message_data}' from peer: {peer_id}");
+
+                                        let json = XML::read::<UserMessage>(&message_data);
+                                        if json.is_err() {
+                                            let _ = json.inspect_err(|e| println!("Invalid parsing xml {}", e));
+                                            continue;
+                                        }
+
+                                        let json = json.unwrap();
+                                        self.broadcast.on_network_room_message(ChatMessage {
+                                            id: json.id.to_string(),
+                                            content: json.m.to_string(),
+                                            sender: peer_id.to_string()
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            MyBehaviourEvent::Relay(relay) => {
+                                match relay {
+                                    relay::client::Event::ReservationReqAccepted { .. } => {
+                                        logln!(self, "📡 Реле подключилось");
+                                        let ext_addresses: Vec<Multiaddr> =  swarm.external_addresses().cloned().collect();
+                                        let behaviour = swarm.behaviour_mut();
+                                        for ext in ext_addresses {
+                                            behaviour.kademilia.add_address(&local_peer_id, ext.clone());
+                                            behaviour.kademilia.bootstrap().expect("Can't bootstrat kademilia");
+                                            logln!(self, "📡 Kademlia record {}:{}", &local_peer_id, &ext.clone().to_string());
+                                        }
+                                    }
+                                     _ => {}
+                                }
+                            }
+                            MyBehaviourEvent::Mdns(mdns) => {
+                                match mdns {
+                                    mdns::Event::Discovered(list) => {
+                                        for (peer_id, _multiaddr) in list {
+                                            logln!(self, "mDNS discovered a new peer: {peer_id}");
+                                            swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                                        }
+                                    }
+                                    mdns::Event::Expired(list) => {
+                                        for (peer_id, _multiaddr) in list {
+                                            logln!(self, "mDNS discover peer has expired: {peer_id}");
+                                            swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                                        }
+                                    }
+                                }
+                            }
+                            MyBehaviourEvent::Upnp(upnp) => {
+                                match upnp {
+                                    upnp::Event::NewExternalAddr(external_addr) => {
+                                        logln!(self, "New external address: {external_addr}");
+                                    }
+                                    upnp::Event::GatewayNotFound => {
+                                        logln!(self, "Gateway does not support UPnP");
+                                    }
+                                    upnp::Event::NonRoutableGateway => {
+                                        logln!(self, "Gateway is not exposed directly to the public Internet, i.e. it itself has a private IP address.");
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            MyBehaviourEvent::Autonat(autonat::Event::StatusChanged { old, new }) => {
+                                logln!(self, "🌐 Статус NAT изменился: {:?} -> {:?}", old, new);
+                            }
+                            MyBehaviourEvent::Dcutr(event) => {
+                                logln!(self, "🛠️ DCUtR Event: {:?}", event);
+                            }
+                            MyBehaviourEvent::Identify(identify::Event::Received { peer_id, info }) => {
+                                for relay_addr in relays.clone() {
+                                    if relay_addr.contains(&peer_id.to_string()) {
+                                        logln!(self, "🛠 Протоколы реле: {:?}", peer_id);
+                                        for p in info.protocols.iter() {
+                                            logln!(self, "🚀 {}", p)
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     SwarmEvent::ExternalAddrExpired { address } => {
                         logln!(self, "❌ Адрес протух: {address}");
@@ -296,96 +401,6 @@ impl  P2PEngine {
                             if relay.contains(&peer_id.to_string()) {
                                 // swarm.dial(Multiaddr::from_str(&relay).unwrap()).unwrap();
                                 logln!(self, "⚠️ Реле отключилось. Пробую переподключиться через 5 сек... {}", peer_id);
-                            }
-                        }
-                    }
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
-                        for (peer_id, _multiaddr) in list {
-                            logln!(self, "mDNS discovered a new peer: {peer_id}");
-                            swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                        }
-                    },
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
-                        for (peer_id, _multiaddr) in list {
-                            logln!(self, "mDNS discover peer has expired: {peer_id}");
-                            swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                        }
-                    },
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted {
-                        .. 
-                    })) => {
-                        logln!(self, "📡 Реле подключилось");
-                        let ext_addresses: Vec<Multiaddr> =  swarm.external_addresses().cloned().collect();
-                        let behaviour = swarm.behaviour_mut();
-                        for ext in ext_addresses {
-                            behaviour.kademilia.add_address(&local_peer_id, ext.clone());
-                            behaviour.kademilia.bootstrap().expect("Can't bootstrat kademilia");
-                            logln!(self, "📡 Kademlia record {}:{}", &local_peer_id, &ext.clone().to_string());
-                        }
-                    }
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(gossipsub::Event::Message {
-                        propagation_source: peer_id,
-                        message,
-                        ..
-                    })) => {
-                        let message_data = String::from_utf8_lossy(&message.data);
-                        logln!(self, "Got message: '{message_data}' from peer: {peer_id}");
-
-                        let json = XML::read::<UserMessage>(&message_data);
-                        if json.is_err() {
-                            let _ = json.inspect_err(|e| println!("Invalid parsing xml {}", e));
-                            continue;
-                        }
-
-                        let json = json.unwrap();
-                        self.broadcast.on_network_room_message(ChatMessage {
-                            id: json.id.to_string(),
-                            content: json.m.to_string(),
-                            sender: peer_id.to_string()
-                        });
-                    }
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Autonat(autonat::Event::StatusChanged { old, new })) => {
-                        logln!(self, "🌐 Статус NAT изменился: {:?} -> {:?}", old, new);
-                    },
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Dcutr(event)) => {
-                        logln!(self, "🛠️ DCUtR Event: {:?}", event);
-                    }
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Identify(identify::Event::Received { peer_id, info })) => {
-                        for relay_addr in relays.clone() {
-                            if relay_addr.contains(&peer_id.to_string()) {
-                                logln!(self, "🛠 Протоколы реле: {:?}", peer_id);
-                                for p in info.protocols.iter() {
-                                    logln!(self, "🚀 {}", p)
-                                }
-                            }
-                        }
-                    }
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Kademilia(kad::Event::RoutablePeer { peer, address })) => {
-                        if peer == local_peer_id {
-                            continue;
-                        }
-                        self.listen_relay(&address.to_string(), &mut swarm)?;
-                        logln!(self, "📡 Try Relay {address}");
-                    }
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Kademilia(kad::Event::OutboundQueryProgressed { result, .. })) => {
-                        match result {
-                            kad::QueryResult::GetProviders(Ok(ok)) => {
-                                match ok {
-                                    kad::GetProvidersOk::FoundProviders { providers, .. } => {
-                                        for peer_id in providers {
-                                            if peer_id != local_peer_id {
-                                                logln!(self, "📍 Нашел провайдера: {peer_id}. Пробую Dial...");
-                                                let _ = swarm.dial(peer_id);
-                                            }
-                                        }
-                                    },
-                                    _ => {
-                                        logln!(self, "🏁 Поиск завершен");
-                                    }
-                                }
-                            }
-                            _ => {
-                                logln!(self, "=== KAD PROGRESS: {:?} ===", result);
                             }
                         }
                     }
