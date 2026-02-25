@@ -1,5 +1,5 @@
 use ratatui::{
-    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Alignment, Constraint, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
+    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Alignment, Constraint::{self, Fill, Length, Max, Min, Percentage, Ratio}, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
 };
 use crossterm::event::{EventStream};
 use uuid::Uuid;
@@ -271,9 +271,46 @@ impl App {
         // == TAB BODY ===
         match self.selected_tab {
             SelectedTab::Chat => {
-                Paragraph::new(format!(" {} ", self.input.as_str()))
-                    .block(Block::bordered().title("Input"))
-                    .render(inner_area, buf);
+                let chat_layout = Layout::vertical([Min(3), Percentage(100)]);
+                let [ input_area, message_area ] = chat_layout.areas(inner_area);
+                let horizontal_padding = 2;
+                let placeholder= "Write your message here";
+                // === INPUT ===
+                Paragraph::new(format!("{}", if self.input.len() > 0 { self.input.as_str() } else { placeholder }))
+                    .fg(if self.input.len() > 0 { Color::White } else { Color::DarkGray })
+                    .block(Block::new()
+                        .padding(Padding::horizontal(horizontal_padding.clone()))
+                        .title("Input"))
+                    .render(input_area, buf);
+
+                // === MESSAGES ===
+                let messages: Vec<ListItem> = self.messages
+                    .iter()
+                    .map(|l| {
+                        let line = Line::from(format!("{}: {}", l.sender, l.content));
+                        ListItem::new(line)
+                    })
+                    .collect();
+
+                let scroll = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(Some("↑"))
+                    .end_symbol(Some("↓"));
+
+                self.scroll_state = self.scroll_state.content_length(messages.clone().len());
+                if self.auto_scroll {
+                    self.scroll_last();
+                }
+
+                let list = List::new(messages.clone())
+                    .block(Block::new()
+                    .padding(Padding::horizontal(horizontal_padding.clone())));
+                let scroll_render = message_area.inner(Margin {
+                    vertical: 0,
+                    horizontal: 0
+                });
+
+                StatefulWidget::render(list, scroll_render, buf, &mut self.list_state);
+                StatefulWidget::render(scroll, scroll_render, buf, &mut self.scroll_state);
             },
             SelectedTab::Logs => {
                 let logs: Vec<ListItem> = self.logs
@@ -306,6 +343,7 @@ impl App {
             }
         }
         
+        // === INNER BORDER ===
         Paragraph::new("")
             .block(Block::bordered()
                 .border_set(symbols::border::PROPORTIONAL_TALL)
