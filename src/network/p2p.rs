@@ -28,7 +28,7 @@ struct MyBehaviour {
     dcutr: dcutr::Behaviour
 }
 
-const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
+const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/guardi-vpn/kad/0.0.1");
 
 pub struct P2PEngine {
     pub broadcast: P2PBroadcast
