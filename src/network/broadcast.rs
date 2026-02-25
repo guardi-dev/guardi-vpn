@@ -7,7 +7,6 @@ pub struct LogMessage {
     pub content: String,
 }
 
-// 1. Декларируем конкретные типы данных (наши "события")
 #[derive(Clone, Debug)]
 pub struct UserMessage {
     pub content: String,
@@ -15,6 +14,7 @@ pub struct UserMessage {
 
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
+    pub id: String,
     pub sender: String,
     pub content: String,
 }

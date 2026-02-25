@@ -2,7 +2,8 @@ use ratatui::{
     DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Alignment, Constraint, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
 };
 use crossterm::event::{EventStream};
-use crate::network::broadcast::{EngineEvent, P2PBroadcast, StatsMessage};
+use uuid::Uuid;
+use crate::network::broadcast::{ChatMessage, EngineEvent, P2PBroadcast, StatsMessage};
 use futures_util::StreamExt; // Важно для метода .next()
 use strum::{Display, EnumCount, EnumIter, FromRepr, IntoEnumIterator};
 
@@ -23,7 +24,7 @@ pub struct App {
 
     input_mode: InputMode,
     
-    messages: Vec<String>,
+    messages: Vec<ChatMessage>,
 
     selected_tab: SelectedTab,
 
@@ -124,7 +125,7 @@ impl App {
     }
 
     fn submit_message(&mut self) {
-        // self.messages.push(self.input.clone());
+        self.messages.push(ChatMessage { id: Uuid::new_v4().to_string(), sender: "Me".to_string(), content: self.input.clone() });
         self.input.clear();
         self.reset_cursor();
     }
@@ -213,8 +214,7 @@ impl App {
 				Ok(event) = tx.recv() => {
 					match event {
 						EngineEvent::Chat(msg) => {
-							let user_message = format!("[{}] {}", msg.sender, msg.content);
-							self.messages.push(user_message);
+							self.messages.push(msg);
 						}
                         EngineEvent::Log(msg) => {
                             self.logs.push(msg.content);

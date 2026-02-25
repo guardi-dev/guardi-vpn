@@ -306,15 +306,22 @@ impl  P2PEngine {
                     }
                     SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                         propagation_source: peer_id,
-                        message_id: id,
                         message,
+                        ..
                     })) => {
                         let message_data = String::from_utf8_lossy(&message.data);
-                        logln!(self, "Got message: '{message_data}' with id: {id} from peer: {peer_id}");
+                        logln!(self, "Got message: '{message_data}' from peer: {peer_id}");
 
-                        // send user message to any other subscriber
+                        let json = XML::read::<UserMessage>(&message_data);
+                        if json.is_err() {
+                            let _ = json.inspect_err(|e| println!("Invalid parsing xml {}", e));
+                            continue;
+                        }
+
+                        let json = json.unwrap();
                         self.broadcast.on_network_room_message(ChatMessage {
-                            content: message_data.to_string(),
+                            id: json.id.to_string(),
+                            content: json.m.to_string(),
                             sender: peer_id.to_string()
                         });
                     }
