@@ -36,7 +36,6 @@ pub enum EngineEvent {
 	Stats(StatsMessage)
 }
 
-
 pub struct P2PBroadcast {
     // Передатчик событий
     tx: broadcast::Sender<EngineEvent>,
@@ -65,11 +64,16 @@ impl P2PBroadcast {
 	// === P2P MESSAGES ===
     pub fn logln (&self, args: fmt::Arguments) {
         let log = fmt::format(args);
-        // === DEBUG ===
-        // println!("{log}");
-        let file = OpenOptions::new().append(true).create(true).open("tmp/p2p_engine.logs").unwrap();
-        let mut writer = BufWriter::new(file);
-        writeln!(writer, "{}", log).ok();
+        match std::env::var("DEBUG") {
+            Ok(key) => {
+                if key.len() > 0 {
+                    let file = OpenOptions::new().append(true).create(true).open("tmp/p2p_engine.logs").unwrap();
+                    let mut writer = BufWriter::new(file);
+                    writeln!(writer, "{}", log).ok();
+                }
+            },
+            _ => {}
+        }
         let event = EngineEvent::Log(LogMessage { content: log });
         let _ = self.tx.send(event);
     }
