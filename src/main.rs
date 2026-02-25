@@ -1,10 +1,17 @@
-use std::{fs, sync::Arc, thread};
+use std::{env, fs, sync::Arc, thread};
 use guardi_vpn::{network::{p2p::P2PEngine}, terminal::user_input::App};
 
 #[tokio::main]
 async fn main() {
-    let _ = fs::remove_dir_all("tmp");
-    let _ = fs::create_dir("tmp");
+    match env::var("DEBUG") {
+        Ok(key) => {
+            if key.len() > 0 {
+                let _ = fs::remove_dir_all("tmp");
+                let _ = fs::create_dir("tmp");
+            }
+        },
+        _ => {}
+    }
 
     // === P2P ===
     let p2p = Arc::new(P2PEngine::new());
