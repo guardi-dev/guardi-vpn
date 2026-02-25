@@ -1,5 +1,5 @@
 use ratatui::{
-    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Alignment, Constraint::{self, Fill, Length, Max, Min, Percentage, Ratio}, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
+    DefaultTerminal, Frame, buffer::Buffer, crossterm::event::{Event, KeyCode}, layout::{Alignment, Constraint::{self, Percentage}, Layout, Margin, Rect}, style::{Color, Stylize, palette::tailwind}, symbols, text::{Line, Span}, widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Tabs, Widget}
 };
 use crossterm::event::{EventStream, KeyEventKind, KeyModifiers};
 use uuid::Uuid;
@@ -289,8 +289,20 @@ impl App {
                 let messages: Vec<ListItem> = self.messages
                     .iter()
                     .map(|l| {
-                        let line = Line::from(format!("{}: {}", l.sender, l.content));
-                        ListItem::new(line)
+                        let max = 8;
+                        let title_text = format!(
+                            "{}: ", 
+                            if l.sender.len() > max {
+                                truncate_start(&l.sender, max)
+                            } else { 
+                                l.sender.to_string() 
+                            }
+                        );
+                        let title = Span::from(title_text)
+                            .fg(Color::DarkGray);
+                        let content = Span::from(l.content.to_string());
+                        let row = Line::from(vec![title, content]);
+                        ListItem::new(row)
                     })
                     .collect();
 
@@ -388,4 +400,14 @@ fn render_footer(area: Rect, buf: &mut Buffer) {
     Line::raw("Press 'Tab' change to next tab | Press 'Ctrl+Q' or 'Esc' to quit | ▲ ▼ to scroll")
         .centered()
         .render(area, buf);
+}
+
+fn truncate_start(s: &str, max: usize) -> String {
+    let count = s.chars().count();
+    if count <= max {
+        return s.to_string();
+    }
+    // Пропускаем лишние символы в начале
+    let truncated: String = s.chars().skip(count - max).collect();
+    format!("...{}", truncated)
 }
