@@ -1,5 +1,5 @@
 use std::{
-    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::{Ipv4Addr}, str::FromStr, time::Duration
+    collections::hash_map::DefaultHasher, error::Error, hash::{Hash, Hasher}, net::Ipv4Addr, num::{NonZero}, str::FromStr, time::Duration
 };
 
 use futures::stream::StreamExt;
@@ -29,6 +29,8 @@ struct MyBehaviour {
 }
 
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
+
+const TOPIC: &str = "guardi-vpn";
 
 pub struct P2PEngine {
     pub broadcast: P2PBroadcast
@@ -131,6 +133,7 @@ impl  P2PEngine {
 
                 let store = MemoryStore::new(key.public().to_peer_id());
                 let mut cfg = kad::Config::default();
+                cfg.set_parallelism(NonZero::new(30 as usize).expect("Zero"));
                 let protos = vec![IPFS_PROTO_NAME];
                 cfg.set_protocol_names(protos);
                 let kademilia = kad::Behaviour::with_config(key.public().to_peer_id(), store, cfg);
@@ -192,7 +195,9 @@ impl  P2PEngine {
 
 
         // Create a Gossipsub topic
-        let topic = gossipsub::IdentTopic::new("guardi-vpn");
+        let topic = gossipsub::IdentTopic::new(TOPIC);
+        let topic_key = RecordKey::new(&topic.to_string());
+
         // subscribes to our topic
         
         swarm.behaviour_mut()
@@ -203,8 +208,6 @@ impl  P2PEngine {
 
         swarm.behaviour_mut()
             .kademilia.set_mode(Some(libp2p::kad::Mode::Client));
-
-        let topic_key = RecordKey::new(&topic.to_string());
 
         // === LISTENERS ===
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
@@ -236,7 +239,9 @@ impl  P2PEngine {
                     swarm.behaviour_mut()
                         .kademilia.start_providing(topic_key.clone()).unwrap();
                     swarm.behaviour_mut()
-                        .kademilia.get_providers(topic_key.clone());
+                        .kademilia.get_closest_peers(topic_key.to_vec());
+                    // swarm.behaviour_mut()
+                        // .kademilia.get_providers(topic_key.clone());
                     logln!(self, "📡 Kademilia provisioning");
                 }
                 tx_event = tx.recv() => {
@@ -272,21 +277,33 @@ impl  P2PEngine {
                                     }
                                     kad::Event::OutboundQueryProgressed { result, .. } => {
                                         match result {
-                                            kad::QueryResult::GetProviders(Ok(ok)) => {
+                                            kad::QueryResult::GetClosestPeers(Ok(ok)) => {
                                                 match ok {
-                                                    kad::GetProvidersOk::FoundProviders { providers, .. } => {
-                                                        for peer_id in providers {
+                                                    kad::GetClosestPeersOk { peers, .. } => {
+                                                        for peer_id in peers {
                                                             if peer_id != local_peer_id {
-                                                                logln!(self, "📍 Нашел провайдера: {peer_id}. Пробую Dial...");
+                                                                logln!(self, "📍 Found closest peer: {peer_id}. Try Dial...");
                                                                 let _ = swarm.dial(peer_id);
                                                             }
                                                         }
-                                                    },
-                                                    _ => {
-                                                        logln!(self, "🏁 Поиск завершен");
                                                     }
                                                 }
                                             }
+                                            // kad::QueryResult::GetProviders(Ok(ok)) => {
+                                            //     match ok {
+                                            //         kad::GetProvidersOk::FoundProviders { providers, .. } => {
+                                            //             for peer_id in providers {
+                                            //                 if peer_id != local_peer_id {
+                                            //                     logln!(self, "📍 Нашел провайдера: {peer_id}. Пробую Dial...");
+                                            //                     let _ = swarm.dial(peer_id);
+                                            //                 }
+                                            //             }
+                                            //         },
+                                            //         _ => {
+                                            //             logln!(self, "🏁 Поиск завершен");
+                                            //         }
+                                            //     }
+                                            // }
                                             _ => {
                                                 logln!(self, "=== KAD PROGRESS: {:?} ===", result);
                                             }
