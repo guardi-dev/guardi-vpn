@@ -4,7 +4,7 @@ use std::{
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, upnp, yamux
+    Multiaddr, PeerId, StreamProtocol, Swarm, TransportError, autonat, core::transport::ListenerId, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, upnp, yamux
 };
 use tokio::{io, select};
 use tracing_subscriber::{EnvFilter};
@@ -40,6 +40,23 @@ impl  P2PEngine {
         return P2PEngine {
             broadcast: P2PBroadcast::new()
         }
+    }
+
+    fn listen_relay (&self, addr: &String, swarm: &mut Swarm<MyBehaviour>) -> Result<ListenerId, TransportError<std::io::Error>> {
+        let relay_arr: Vec<&str> = addr.split("/p2p/").collect();
+        let relay_addr = Multiaddr::from_str(relay_arr[0]).unwrap();
+        let relay_peer_id = PeerId::from_str(relay_arr[1]).unwrap();
+
+        let target = relay_addr.clone()
+            .with(Protocol::P2p(relay_peer_id))
+            .with(Protocol::P2pCircuit);
+
+        // swarm.dial(Multiaddr::from_str(&relay_str).unwrap()).unwrap();
+        let res = swarm.listen_on(target.clone());
+        if res.is_ok() {
+            logln!(self, "📡 Subscribe to relays {}", addr);
+        }
+        res
     }
 
     pub async fn listen(&self) -> Result<(), Box<dyn Error>> {
@@ -141,7 +158,7 @@ impl  P2PEngine {
             })?
             .build();
         
-        let bootstraps = [
+        let bootstraps: Vec<&str> = vec![
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
@@ -183,23 +200,13 @@ impl  P2PEngine {
         swarm.listen_on("/ip4/0.0.0.0/tcp/0/ws".parse()?)?;
         swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
-        let relays = vec![
-            "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN", // working
-            "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x", // working
+        let relays: Vec<&str> = vec![
+            // "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN", // working
+            // "/ip4/107.174.64.174/udp/4001/quic-v1/p2p/12D3KooWK7tafwD96QWVGcEESBHx5nNVRTFDxidEZdTKQYjHpG9x", // working
         ];
 
         for relay_str in relays.clone() {
-            let relay_arr: Vec<&str> = relay_str.split("/p2p/").collect();
-            let relay_addr = Multiaddr::from_str(relay_arr[0]).unwrap();
-            let relay_peer_id = PeerId::from_str(relay_arr[1]).unwrap();
-
-            let target = relay_addr.clone()
-                .with(Protocol::P2p(relay_peer_id))
-                .with(Protocol::P2pCircuit);
-
-            swarm.listen_on(target.clone())?;
-            // swarm.dial(Multiaddr::from_str(&relay_str).unwrap()).unwrap();
-            logln!(self, "📡 Subscribe to relays {}", relay_str);
+            self.listen_relay(&relay_str.to_string(), &mut swarm)?;
         }
 
         let local_peer_id = *swarm.local_peer_id();
@@ -341,6 +348,13 @@ impl  P2PEngine {
                             }
                         }
                     }
+                    SwarmEvent::Behaviour(MyBehaviourEvent::Kademilia(kad::Event::RoutablePeer { peer, address })) => {
+                        if peer == local_peer_id {
+                            continue;
+                        }
+                        self.listen_relay(&address.to_string(), &mut swarm)?;
+                        logln!(self, "📡 Try Relay {address}");
+                    }
                     SwarmEvent::Behaviour(MyBehaviourEvent::Kademilia(kad::Event::OutboundQueryProgressed { result, .. })) => {
                         match result {
                             kad::QueryResult::GetProviders(Ok(ok)) => {
@@ -382,9 +396,9 @@ impl  P2PEngine {
                     let room_peers = behaviour.gossipsub.all_peers().filter(|(_,t)| t.contains(&&topic.hash())).count();
                     let ext_addresses: Vec<&Multiaddr> = swarm.external_addresses().collect();
                     let ext_addresses_count = ext_addresses.len();
-                    for ex in ext_addresses {
-                        logln!(self, "📡 Active Relay {ex}");
-                    }
+                    // for ex in ext_addresses {
+                        // logln!(self, "📡 Active Relay {ex}");
+                    // }
 
                     // send stats to any other subscriber
                     self.broadcast.on_stats(StatsMessage {
