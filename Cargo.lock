@@ -1811,12 +1811,15 @@ dependencies = [
  "futures-timer",
  "futures-util",
  "libp2p",
+ "quick-xml",
  "rand 0.10.0",
  "ratatui",
+ "serde",
  "strum 0.28.0",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -4010,6 +4013,16 @@ dependencies = [
  "quick-protobuf",
  "thiserror 1.0.69",
  "unsigned-varint 0.8.0",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.39.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "958f21e8e7ceb5a1aa7fa87fab28e7c75976e0bfe7e23ff069e0a260f894067d"
+dependencies = [
+ "memchr",
+ "serde",
 ]
 
 [[package]]

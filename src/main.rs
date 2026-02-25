@@ -1,5 +1,5 @@
 use std::{fs, sync::Arc, thread};
-use guardi_vpn::{network::p2p::P2PEngine, terminal::user_input::App};
+use guardi_vpn::{network::{p2p::P2PEngine}, terminal::user_input::App};
 
 #[tokio::main]
 async fn main() {

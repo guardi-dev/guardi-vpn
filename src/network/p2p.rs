@@ -9,9 +9,9 @@ use libp2p::{
 use tokio::{io, select};
 use tracing_subscriber::{EnvFilter};
 use kad::store::MemoryStore;
+use uuid::Uuid;
 
-use crate::network::broadcast::{ChatMessage, P2PBroadcast, StatsMessage, EngineEvent};
-
+use crate::network::{broadcast::{ChatMessage, EngineEvent, P2PBroadcast, StatsMessage}, xml::{MessageType, UserMessage, XML}};
 use crate::logln;
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
@@ -211,7 +211,6 @@ impl  P2PEngine {
         let mut last_provisioning = tokio::time::interval(std::time::Duration::from_mins(1));
 
         let mut tx = self.broadcast.subscribe();
-        // === WRITE SOME FUNCTIONS HERE 
 
         loop {
             select! {
@@ -225,8 +224,17 @@ impl  P2PEngine {
                 tx_event = tx.recv() => {
                     match tx_event {
                         Ok(EngineEvent::User(msg)) => {
+                            let xml = XML::write(&UserMessage {
+                                id: &Uuid::new_v4().to_string(),
+                                m: &msg.content,
+                                t: MessageType::ChatPlain
+                            });
+                            if xml.is_err() {
+                                let _ = xml.inspect_err(|e| logln!(self, "Invalid xml writing: {e}"));
+                                continue;
+                            }
                             let behaviour = swarm.behaviour_mut();
-                            let res = behaviour.gossipsub.publish(topic.clone(), msg.content);
+                            let res = behaviour.gossipsub.publish(topic.clone(), xml.unwrap());
                             let _ = res.inspect_err(|e| logln!(self, "Invalid publish: {e}"));
                         }
                         _ => {}
