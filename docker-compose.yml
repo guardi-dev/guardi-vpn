@@ -5,16 +5,16 @@ services:
     # cap_add и network_mode необходимы для работы sniffer (raw sockets)
     environment:
       - DEBUG=1
-    networks:
-      - nat_net_1
+    # networks:
+      # - nat_net_1
 
   vpn_beta:
     restart: always
     build: .
     environment:
       - DEBUG=1
-    networks:
-      - nat_net_2
+    # networks:
+      # - nat_net_2
 
 networks:
   nat_net_1:
