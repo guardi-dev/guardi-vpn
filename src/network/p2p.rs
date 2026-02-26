@@ -212,7 +212,6 @@ impl  P2PEngine {
                     if ext_count > 0 {
                         logln!(self, "📡 Kademilia provisioning");
                         let _ = swarm.behaviour_mut().kademilia.start_providing(topic_key.clone());
-                        swarm.behaviour_mut().kademilia.get_record(topic_key.clone());
                         swarm.behaviour_mut().kademilia.get_providers(topic_key.clone());
                     }
                 }
