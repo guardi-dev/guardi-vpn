@@ -59,12 +59,12 @@ impl  P2PEngine {
                 noise::Config::new,
                 yamux::Config::default,
             )?
-            // .with_quic()
+            .with_quic()
             .with_dns()?
-            .with_websocket( // <-- Вот он, родной
-                noise::Config::new,
-                yamux::Config::default
-            ).await.unwrap()
+            // .with_websocket( // <-- Вот он, родной
+            //     noise::Config::new,
+            //     yamux::Config::default
+            // ).await.unwrap()
             .with_relay_client(noise::Config::new, yamux::Config::default)?
             .with_behaviour(|key, relay| {
                 // To content-address message, we can take the hash of message and use it as an ID.
@@ -169,7 +169,7 @@ impl  P2PEngine {
         // === LISTENERS ===
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
         // swarm.listen_on("/ip4/0.0.0.0/tcp/0/ws".parse()?)?;
-        // swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
+        swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
         let bootstraps: Vec<&str> = vec![
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
@@ -236,6 +236,9 @@ impl  P2PEngine {
                 }
                 event = swarm.select_next_some() => match event {
                     SwarmEvent::NewExternalAddrOfPeer { peer_id, address } => {
+                        // if address.to_string().contains("/ws") {
+                        //     continue;
+                        // }
                         logln!(self, "📡 New External Addr of Peer {} {}", peer_id, address);
                         let circuit = address.clone()
                             .with(Protocol::P2p(peer_id))
@@ -269,12 +272,17 @@ impl  P2PEngine {
                                             continue;   
                                         }
 
+                                        // let circuit = address.clone()
+                                        //     .with(Protocol::P2p(peer))
+                                        //     .with(Protocol::P2pCircuit);
+                                        // let res = swarm.listen_on(circuit);
                                         // swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                                         // swarm.add_peer_address(peer, address);
                                         // logln!(self, "📡 Added peer address: {peer}");
                                         // let res = swarm.dial(address.clone());
                                         // if res.is_err() {
-                                            // logln!(self, "❌ Invalid dial {} {}", address.clone(), res.unwrap_err());
+                                        //     logln!(self, "❌ Invalid route listening {} {}", address.clone(), res.unwrap_err());
+                                        //     continue;
                                         // }
                                         // logln!(self, "📡 Add relay {}", address.clone());
                                     }
@@ -311,8 +319,8 @@ impl  P2PEngine {
                             MyBehaviourEvent::Gossipsub(gossipsub) => {
                                 match gossipsub {
                                     gossipsub::Event::GossipsubNotSupported { peer_id } => {
-                                        // logln!(self, "❌ Gosipsub not supported {peer_id}");
-                                        // let _ = swarm.disconnect_peer_id(peer_id);
+                                        logln!(self, "❌ Gosipsub not supported {peer_id}");
+                                        let _ = swarm.disconnect_peer_id(peer_id);
                                     }
                                     gossipsub::Event::Message {
                                         propagation_source: peer_id,
