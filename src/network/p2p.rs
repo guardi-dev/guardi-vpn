@@ -1,10 +1,10 @@
 use std::{
-    collections::{HashSet, hash_map::DefaultHasher}, error::Error, hash::{Hash, Hasher}, num::NonZero, str::FromStr, time::Duration
+    collections::{hash_map::DefaultHasher}, error::Error, hash::{Hash, Hasher}, num::NonZero, str::FromStr, time::Duration
 };
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent}, tcp, upnp, yamux
+    Multiaddr, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent, dial_opts::{DialOpts, PeerCondition}}, tcp, upnp, yamux
 };
 use tokio::{io, select};
 use tracing_subscriber::{EnvFilter};
@@ -179,19 +179,20 @@ impl  P2PEngine {
         // swarm.behaviour_mut()
             // .kademilia.start_providing(topic_key.clone()).unwrap();
 
-        let bootstraps: Vec<&str> = vec![
+        let bootstraps: Vec<Multiaddr> = vec![
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
             "/dnsaddr/va1.bootstrap.libp2p.io/p2p/12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
             "/ip4/104.131.131.82/udp/4001/quic-v1/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
-        ];
+        ].iter().map(|i| {
+            let addr = Multiaddr::from_str(i).unwrap();
+            addr.clone().with(Protocol::P2pCircuit)
+        }).collect();
 
-        for addr_str in bootstraps.clone() {
-            let addr = Multiaddr::from_str(addr_str)?;
-            let addr_circuit = addr.clone().with(Protocol::P2pCircuit);
-            swarm.listen_on(addr_circuit)?;
+        for addr in bootstraps.clone() {
+            swarm.listen_on(addr)?;
         }
 
         let local_peer_id = *swarm.local_peer_id();
@@ -202,8 +203,6 @@ impl  P2PEngine {
         let mut last_provisioning = tokio::time::interval(std::time::Duration::from_secs(30));
 
         let mut tx = self.broadcast.subscribe();
-
-        let mut blocked_peer_ids: HashSet<PeerId> = HashSet::new();
 
         loop {
             select! {   
@@ -245,18 +244,14 @@ impl  P2PEngine {
                     }
                     // SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                     //     if let Some(value) = peer_id {
-                    //         logln!(self, "❌ Block peer by cause {error}");
-                    //         blocked_peer_ids.insert(value.clone());
-                    //         let _ = swarm.disconnect_peer_id(value.clone());
+                    //         logln!(self, "❌ Outgoing connection error {} {}", value, error);
                     //     }
                     // }
-                    SwarmEvent::ExternalAddrConfirmed { address } => {
-                        logln!(self, "📡 External Addr Confirmed, put KAD record {}", address);
+                    SwarmEvent::ExternalAddrConfirmed { .. } => {
+                        logln!(self, "📡 External Addr Confirmed");
                     }
                     SwarmEvent::ExternalAddrExpired { address } => {
                         logln!(self, "❌ Remote address expired: {address}");
-                        swarm.behaviour_mut()
-                            .kademilia.remove_address(&local_peer_id, &address);
                     }
                     SwarmEvent::Behaviour(my_behaviour) => {
                         match my_behaviour {
@@ -269,24 +264,14 @@ impl  P2PEngine {
                                                     kad::GetProvidersOk::FoundProviders { providers, .. } => {
                                                         for peer_id in providers {
                                                             if peer_id == local_peer_id { continue; }
-                                                            if blocked_peer_ids.contains(&peer_id) { continue; }
 
                                                             logln!(self, "📍 Нашел провайдера: {peer_id}. Пробую Dial...");
-                                                            let ext: Vec<Multiaddr> = swarm.external_addresses().cloned().collect();
-                                                            for boot in ext {
-                                                                let err: Result<(), Box<dyn Error>> = (|| {
-                                                                    let mut addr = boot.clone();
-                                                                    addr.pop();
-                                                                    addr = addr.with(Protocol::P2p(peer_id));
-                                                                    swarm.dial(addr.clone())?;
-                                                                    Ok(())
-                                                                })();
-                                                                if err.is_err() {
-                                                                    logln!(self, "❌ Block peer {}", err.unwrap_err());
-                                                                    blocked_peer_ids.insert(peer_id.clone());
-                                                                    continue;
-                                                                }
-                                                            }
+                                                            let dial = DialOpts::peer_id(peer_id)
+                                                                .condition(PeerCondition::Disconnected)
+                                                                .addresses(bootstraps.clone())
+                                                                .extend_addresses_through_behaviour()
+                                                                .build();
+                                                            let _ = swarm.dial(dial);
                                                         }
                                                     },
                                                     _ => {
