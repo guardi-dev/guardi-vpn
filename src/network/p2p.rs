@@ -44,12 +44,6 @@ impl  P2PEngine {
         }
     }
 
-    fn listen_on_relay (&self, swarm: &mut Swarm<MyBehaviour>, addr: &Multiaddr) -> Result<(), Box<dyn Error>> {
-        let relay = addr.clone().with(Protocol::P2pCircuit);
-        swarm.listen_on(relay)?;
-        Ok(())
-    }
-
     pub async fn listen(&self) -> Result<(), Box<dyn Error>> {
         env_logger::init();
 
@@ -149,25 +143,6 @@ impl  P2PEngine {
                 })
             })?
             .build();
-        
-        let bootstraps: Vec<&str> = vec![
-            "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-            "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-            "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-            "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-            "/dnsaddr/va1.bootstrap.libp2p.io/p2p/12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
-            "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
-            "/ip4/104.131.131.82/udp/4001/quic-v1/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
-        ];
-
-        for addr_str in bootstraps {
-            let addr_arr: Vec<&str> = addr_str.split("/").collect();
-            let peer_id_str = addr_arr.last().unwrap();
-            let peer_id = PeerId::from_str(&peer_id_str).unwrap();
-
-            swarm.behaviour_mut().kademilia.add_address(&peer_id, Multiaddr::from_str(&addr_str)?);
-        }
-
 
         // Create a Gossipsub topic
         let topic = gossipsub::IdentTopic::new(TOPIC);
@@ -189,6 +164,24 @@ impl  P2PEngine {
         swarm.listen_on("/ip4/0.0.0.0/tcp/0/ws".parse()?)?;
         swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
+        let bootstraps: Vec<&str> = vec![
+            "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+            "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+            "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+            "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+            "/dnsaddr/va1.bootstrap.libp2p.io/p2p/12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8",
+            "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
+            "/ip4/104.131.131.82/udp/4001/quic-v1/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
+        ];
+
+        for addr_str in bootstraps {
+            swarm.dial(Multiaddr::from_str(addr_str)?)?;
+            // let addr_arr: Vec<&str> = addr_str.split("/").collect();
+            // let peer_id_str = addr_arr.last().unwrap();
+            // let peer_id = PeerId::from_str(&peer_id_str).unwrap();
+            // swarm.behaviour_mut().kademilia.add_address(&peer_id, Multiaddr::from_str(&addr_str)?);
+        }
+
         let local_peer_id = *swarm.local_peer_id();
         logln!(self, "Enter messages via STDIN and they will be sent to connected peers using Gossipsub");
         logln!(self, "Swarm local peer id {}", local_peer_id.clone());
@@ -199,6 +192,7 @@ impl  P2PEngine {
 
         let mut tx = self.broadcast.subscribe();
 
+        // swarm.behaviour_mut().autonat.add_server(peer, address);
         loop {
             select! {   
                 _ = last_provisioning.tick() => {
@@ -241,8 +235,14 @@ impl  P2PEngine {
                                             continue;   
                                         }
 
-                                        self.listen_on_relay(&mut swarm, &address)?;
-                                        logln!(self, "📡 Add relay {}", address.clone());
+                                        // swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                                        // swarm.add_peer_address(peer, address);
+                                        // logln!(self, "📡 Added peer address: {peer}");
+                                        // let res = swarm.dial(address.clone());
+                                        // if res.is_err() {
+                                            // logln!(self, "❌ Invalid dial {} {}", address.clone(), res.unwrap_err());
+                                        // }
+                                        // logln!(self, "📡 Add relay {}", address.clone());
                                     }
                                     kad::Event::OutboundQueryProgressed { result, .. } => {
                                         match result {
@@ -252,10 +252,11 @@ impl  P2PEngine {
                                                         for peer_id in providers {
                                                             if peer_id != local_peer_id {
                                                                 logln!(self, "📍 Нашел провайдера: {peer_id}. Пробую Dial...");
-                                                                let res = swarm.dial(peer_id);
-                                                                if res.is_err() {
-                                                                    logln!(self, "Invalid dial {}", res.unwrap_err())
-                                                                }
+                                                                // swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                                                                // let res = swarm.dial(peer_id);
+                                                                // if res.is_err() {
+                                                                    // logln!(self, "❌ Invalid dial {}", res.unwrap_err())
+                                                                // }
                                                             }
                                                         }
                                                     },
@@ -276,7 +277,7 @@ impl  P2PEngine {
                                 match gossipsub {
                                     gossipsub::Event::GossipsubNotSupported { peer_id } => {
                                         logln!(self, "❌ Gosipsub not supported {peer_id}");
-                                        let _ = swarm.disconnect_peer_id(peer_id);
+                                        // let _ = swarm.disconnect_peer_id(peer_id);
                                     }
                                     gossipsub::Event::Message {
                                         propagation_source: peer_id,
@@ -318,11 +319,6 @@ impl  P2PEngine {
                                     },
                                     relay::client::Event::ReservationReqAccepted { .. } => {
                                         logln!(self, "📡 Реле подключилось");
-                                        let ext_addresses: Vec<Multiaddr> =  swarm.external_addresses().cloned().collect();
-                                        let behaviour = swarm.behaviour_mut();
-                                        for ext in ext_addresses {
-                                            behaviour.kademilia.add_address(&local_peer_id, ext.clone());
-                                        }
                                     }
                                 }
                             }
@@ -356,14 +352,46 @@ impl  P2PEngine {
                                     _ => {}
                                 }
                             }
-                            MyBehaviourEvent::Autonat(autonat::Event::StatusChanged { old, new }) => {
-                                logln!(self, "🌐 Статус NAT изменился: {:?} -> {:?}", old, new);
+                            MyBehaviourEvent::Autonat(autonat) => {
+                                match autonat {
+                                    autonat::Event::StatusChanged { old, new } => {
+                                        logln!(self, "🌐 Статус NAT изменился: {:?} -> {:?}", old, new);
+                                    }
+                                    _ => {}
+                                }
                             }
                             MyBehaviourEvent::Dcutr(event) => {
                                 logln!(self, "🛠️ DCUtR Event: {:?}", event);
                             }
-                            MyBehaviourEvent::Identify(identify::Event::Received { .. }) => {
+                            MyBehaviourEvent::Identify(identify::Event::Received { peer_id, info }) => {
+                                logln!(self, "🛠️ {peer_id}");
+                                // let ext_addrs: Vec<Multiaddr> = swarm.external_addresses().cloned().collect();
+                                // for ext in ext_addrs {
+                                //     if ext == info.observed_addr {
+                                //         return Ok(());
+                                //     }
+                                // }
 
+                                // swarm.add_external_address(info.observed_addr.clone());
+                                // for proto in info.protocols {
+                                    // logln!(self, "🛠️ {proto}"); 
+                                    // if proto.to_string().contains("circuit/relay/0.2.0/hop") {
+                                    //     let res: Result<(), Box<dyn Error>> = (|| {
+                                    //         let addr: Multiaddr = info.observed_addr.clone()
+                                    //             .with(Protocol::P2p(peer_id))
+                                    //             .with(Protocol::P2pCircuit);
+                                    //         swarm.listen_on(addr)?;
+                                    //         Ok(())
+                                    //     })();
+                                    //     if res.is_err() {
+                                    //         logln!(self, "❌ Can't listen circuit relay");
+                                    //     }
+                                    // }
+                                    // if proto.to_string().contains("autonat") {
+                                    //     swarm.behaviour_mut().autonat.add_server(peer_id, Some(info.observed_addr.clone()));
+                                    //     logln!(self, "📡 Added autonat server: {:?}", info.observed_addr);
+                                    // }
+                                // }
                             }
                             _ => {}
                         }
@@ -398,6 +426,13 @@ impl  P2PEngine {
                     let room_peers = behaviour.gossipsub.all_peers().filter(|(_,t)| t.contains(&&topic.hash())).count();
                     let ext_addresses: Vec<&Multiaddr> = swarm.external_addresses().collect();
                     let ext_addresses_count = ext_addresses.len();
+
+                    logln!(self, "Guardi VPN 📚:{} 🌐:{} 📡:{} 💬:{}", 
+                        total_kad_peers,
+                        gossip_peers,
+                        ext_addresses_count,
+                        room_peers
+                    );
                     // for ex in ext_addresses {
                         // logln!(self, "📡 Active Relay {ex}");
                     // }

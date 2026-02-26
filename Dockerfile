@@ -2,5 +2,5 @@
 FROM rust:1.93.0
 RUN apt update && apt install libpcap-dev -y
 WORKDIR /app
-COPY target/debug/guardi-vpn ./guardi-vpn
+COPY target/debug/p2p ./guardi-vpn
 CMD ./guardi-vpn

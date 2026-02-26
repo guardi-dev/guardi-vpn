@@ -1,6 +1,5 @@
-use std::{fmt, fs::{OpenOptions}, io::BufWriter};
+use std::{fmt};
 use tokio::sync::broadcast;
-use std::io::Write;
 
 #[derive(Clone, Debug)]
 pub struct LogMessage {
@@ -67,9 +66,10 @@ impl P2PBroadcast {
         match std::env::var("DEBUG") {
             Ok(key) => {
                 if key.len() > 0 {
-                    let file = OpenOptions::new().append(true).create(true).open("tmp/p2p_engine.logs").unwrap();
-                    let mut writer = BufWriter::new(file);
-                    writeln!(writer, "{}", log).ok();
+                    println!("{log}");
+                    // let file = OpenOptions::new().append(true).create(true).open("tmp/p2p_engine.logs").unwrap();
+                    // let mut writer = BufWriter::new(file);
+                    // writeln!(writer, "{}", log).ok();
                 }
             },
             _ => {}
