@@ -6,8 +6,7 @@ services:
     environment:
       - DEBUG=1
     networks:
-      vpn_net:
-        ipv4_address: 172.20.0.10
+      - nat_net_1
 
   vpn_beta:
     restart: always
@@ -15,12 +14,10 @@ services:
     environment:
       - DEBUG=1
     networks:
-      vpn_net:
-        ipv4_address: 172.20.0.11
+      - nat_net_2
 
 networks:
-  vpn_net:
+  nat_net_1:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/24
+  nat_net_2:
+    driver: bridge
