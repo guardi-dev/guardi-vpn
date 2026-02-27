@@ -105,7 +105,7 @@ impl  P2PEngine {
                     GUARDI_PROTO_NAME
                 ];
                 kad_cfg.set_protocol_names(protos);
-                kad_cfg.set_replication_interval(None);
+                kad_cfg.set_replication_interval(Some(Duration::from_mins(5)));
                 kad_cfg.set_provider_record_ttl(Some(Duration::from_mins(2)));
                 kad_cfg.set_provider_publication_interval(Some(Duration::from_secs(10)));
                 let kad = kad::Behaviour::with_config(key.public().to_peer_id(), kad_store, kad_cfg);
