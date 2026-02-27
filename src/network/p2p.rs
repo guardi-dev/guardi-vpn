@@ -170,7 +170,7 @@ impl  P2PEngine {
         let local_peer_id = *swarm.local_peer_id();
         logln!(self, "Swarm local peer id {}", local_peer_id.clone());
 
-        let mut stats_timer = tokio::time::interval(Duration::from_secs(3));
+        let mut stats_timer = tokio::time::interval(Duration::from_secs(10));
 
         let mut last_provisioning = tokio::time::interval(Duration::from_secs(30));
 
