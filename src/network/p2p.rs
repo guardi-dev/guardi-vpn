@@ -205,13 +205,15 @@ impl  P2PEngine {
         loop {
             select! {   
                 _ = reconnect.tick() => {
-                    let listen_addresses: Vec<Multiaddr> = swarm.listeners().cloned().collect();
+                    let listen_addresses: Vec<Multiaddr> = swarm.external_addresses().cloned().collect();
                     for boot in bootstraps.clone() {
-                        if listen_addresses.contains(&boot) {
-                            continue;
+                        for addr in listen_addresses.clone() {
+                            if addr.to_string().contains(&boot.to_string()) {
+                                continue;
+                            }
+                            logln!(self, "📡 Reconnecting to relay {}", &boot);
+                            let _ = swarm.listen_on(boot.clone());
                         }
-                        logln!(self, "📡 Reconnecting to relay {}", &boot);
-                        let _ = swarm.listen_on(boot.clone());
                     }
                 }
                 _ = last_provisioning.tick() => {
