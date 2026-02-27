@@ -105,8 +105,9 @@ impl  P2PEngine {
                     GUARDI_PROTO_NAME
                 ];
                 kad_cfg.set_protocol_names(protos);
-                kad_cfg.set_provider_record_ttl(Some(Duration::from_mins(1)));
                 kad_cfg.set_replication_interval(None);
+                kad_cfg.set_provider_record_ttl(Some(Duration::from_mins(2)));
+                kad_cfg.set_provider_publication_interval(Some(Duration::from_secs(10)));
                 let kad = kad::Behaviour::with_config(key.public().to_peer_id(), kad_store, kad_cfg);
 
                 let autonat_config = autonat::Config {
@@ -151,6 +152,10 @@ impl  P2PEngine {
         swarm.behaviour_mut()
             .kademilia.set_mode(Some(libp2p::kad::Mode::Client));
 
+        swarm.behaviour_mut()
+            .kademilia.start_providing(topic_key.clone())?;
+
+
         // === LISTENERS ===
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
         swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
@@ -194,8 +199,7 @@ impl  P2PEngine {
                 _ = last_provisioning.tick() => {
                     let ext_count = swarm.external_addresses().count();
                     if ext_count > 0 {
-                        logln!(self, "📡 Kademilia provisioning");
-                        let _ = swarm.behaviour_mut().kademilia.start_providing(topic_key.clone());
+                        logln!(self, "📡 Kademilia get providers");
                         swarm.behaviour_mut().kademilia.get_providers(topic_key.clone());
                     }
                 }
