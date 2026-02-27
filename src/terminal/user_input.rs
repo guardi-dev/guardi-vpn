@@ -196,6 +196,9 @@ impl App {
                                     self.scroll_up();
                                 }
                                 KeyCode::Enter => {
+                                    if self.stats.room_count == 0 {
+                                        continue;
+                                    }
                                     // send message to p2p subscribers
                                     broadcast.send_message(self.input.clone());
                                     self.submit_message();
@@ -276,7 +279,7 @@ impl App {
                 let chat_layout = Layout::vertical([Min(3), Percentage(100)]);
                 let [ input_area, message_area ] = chat_layout.areas(inner_area);
                 let horizontal_padding = 2;
-                let placeholder= "Write your message here";
+                let placeholder= if self.stats.room_count > 0 { "Write your message here" } else { "Discovery peers... Please wait." };
                 // === INPUT ===
                 Paragraph::new(format!("{}", if self.input.len() > 0 { self.input.as_str() } else { placeholder }))
                     .fg(if self.input.len() > 0 { Color::White } else { Color::DarkGray })
