@@ -191,6 +191,10 @@ impl  P2PEngine {
             addr.clone().with(Protocol::P2pCircuit)
         }).collect();
 
+        for boot in bootstraps.clone() {
+            swarm.listen_on(boot)?;
+        }
+
         let local_peer_id = *swarm.local_peer_id();
         logln!(self, "Swarm local peer id {}", local_peer_id.clone());
         // Kick it off
