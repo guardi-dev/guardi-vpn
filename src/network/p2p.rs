@@ -32,7 +32,7 @@ struct MyBehaviour {
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 const ID_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
 const GUARDI_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/guardi-vpn/1.0.0");
-const TOPIC: &str = "guardi-vpn-v2";
+const TOPIC: &str = "guardi-vpn-v3";
 
 pub struct P2PEngine {
     pub broadcast: P2PBroadcast
