@@ -4,7 +4,7 @@ use std::{
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent, dial_opts::{DialOpts, PeerCondition}}, tcp, upnp, yamux
+    Multiaddr, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent, dial_opts::{DialOpts, PeerCondition}}, tcp, yamux
 };
 use tokio::{io, select};
 use tracing_subscriber::{EnvFilter};
@@ -17,14 +17,11 @@ use crate::logln;
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
-    upnp: upnp::tokio::Behaviour,
     gossipsub: gossipsub::Behaviour,
-    // mdns: mdns::tokio::Behaviour,
     ping: ping::Behaviour,
     identify: identify::Behaviour,
     kademilia: kad::Behaviour<MemoryStore>,
     autonat: autonat::Behaviour,
-    relay_server: relay::Behaviour,
     relay: relay::client::Behaviour,
     dcutr: dcutr::Behaviour
 }
@@ -32,7 +29,7 @@ struct MyBehaviour {
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 const ID_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
 const GUARDI_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/guardi-vpn/1.0.0");
-const TOPIC: &str = "guardi-vpn-v3";
+const TOPIC: &str = "guardi-vpn-v4";
 
 pub struct P2PEngine {
     pub broadcast: P2PBroadcast
@@ -99,18 +96,18 @@ impl  P2PEngine {
                 ).with_push_listen_addr_updates(true);
                 let identify = identify::Behaviour::new(identify_config);
 
-                let store = MemoryStore::new(key.public().to_peer_id());
-                let mut cfg = kad::Config::default();
-                cfg.set_parallelism(NonZero::new(3 as usize).expect("Zero"));
+                let kad_store = MemoryStore::new(key.public().to_peer_id());
+                let mut kad_cfg = kad::Config::default();
+                kad_cfg.set_parallelism(NonZero::new(3 as usize).expect("Zero"));
                 let protos = vec![
                     IPFS_PROTO_NAME,
                     ID_PROTO_NAME,
                     GUARDI_PROTO_NAME
                 ];
-                cfg.set_protocol_names(protos);
-                // cfg.set_provider_publication_interval(Some(Duration::from_secs(60)));
-                cfg.set_provider_record_ttl(Some(Duration::from_mins(1)));
-                let kademilia = kad::Behaviour::with_config(key.public().to_peer_id(), store, cfg);
+                kad_cfg.set_protocol_names(protos);
+                kad_cfg.set_provider_record_ttl(Some(Duration::from_mins(1)));
+                kad_cfg.set_replication_interval(None);
+                let kad = kad::Behaviour::with_config(key.public().to_peer_id(), kad_store, kad_cfg);
 
                 let autonat_config = autonat::Config {
                     retry_interval: Duration::from_secs(10),
@@ -127,20 +124,14 @@ impl  P2PEngine {
 
                 let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
 
-                let upnp = upnp::tokio::Behaviour::default();
-
-                let relay_config = relay::Config::default();
-
                 Ok(MyBehaviour { 
-                    upnp,
                     gossipsub, 
                     ping,
                     identify,
-                    kademilia,
+                    kademilia: kad,
                     autonat,
                     relay,
                     dcutr,
-                    relay_server: relay::Behaviour::new(key.public().to_peer_id(), relay_config)
                 })
             })?
             .build();
@@ -329,20 +320,6 @@ impl  P2PEngine {
                                             content: json.m.to_string(),
                                             sender: peer_id.to_string()
                                         });
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            MyBehaviourEvent::Upnp(upnp) => {
-                                match upnp {
-                                    upnp::Event::NewExternalAddr(external_addr) => {
-                                        logln!(self, "New external address: {external_addr}");
-                                    }
-                                    upnp::Event::GatewayNotFound => {
-                                        logln!(self, "Gateway does not support UPnP");
-                                    }
-                                    upnp::Event::NonRoutableGateway => {
-                                        logln!(self, "Gateway is not exposed directly to the public Internet, i.e. it itself has a private IP address.");
                                     }
                                     _ => {}
                                 }
