@@ -327,7 +327,7 @@ impl  P2PEngine {
                                 }
                             }
                             MyBehaviourEvent::Dcutr(event) => {
-                                logln!(self, "🛠️ DCUtR: {:?}", event);
+                                logln!(self, "🛠️ DCUTR {:?}", event.result);
                             }
                             _ => {}
                         }
