@@ -29,7 +29,7 @@ struct MyBehaviour {
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 const ID_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
 const GUARDI_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/guardi-vpn/1.0.0");
-const TOPIC: &str = "guardi-vpn-v4";
+const TOPIC: &str = "guardi-vpn";
 
 pub struct P2PEngine {
     pub broadcast: P2PBroadcast
@@ -251,10 +251,8 @@ impl  P2PEngine {
                     SwarmEvent::IncomingConnection { .. } => {
                         logln!(self, "📥 Входящее соединение...");
                     }
-                    SwarmEvent::IncomingConnectionError { error, local_addr, send_back_addr, .. } => {
+                    SwarmEvent::IncomingConnectionError { error, .. } => {
                         logln!(self, "❌ Incoming connection error {error}");
-                        logln!(self, "❌ Local {}", local_addr);
-                        logln!(self, "❌ Send back {}", send_back_addr);
                     }
                     SwarmEvent::ExternalAddrConfirmed { .. } => {
                         logln!(self, "📡 External Addr Confirmed");
