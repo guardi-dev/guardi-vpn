@@ -4,7 +4,7 @@ use std::{
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, mdns, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent, dial_opts::{DialOpts, PeerCondition}}, tcp, upnp, yamux
+    Multiaddr, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent, dial_opts::{DialOpts, PeerCondition}}, tcp, upnp, yamux
 };
 use tokio::{io, select};
 use tracing_subscriber::{EnvFilter};
@@ -19,7 +19,7 @@ use crate::logln;
 struct MyBehaviour {
     upnp: upnp::tokio::Behaviour,
     gossipsub: gossipsub::Behaviour,
-    mdns: mdns::tokio::Behaviour,
+    // mdns: mdns::tokio::Behaviour,
     ping: ping::Behaviour,
     identify: identify::Behaviour,
     kademilia: kad::Behaviour<MemoryStore>,
@@ -92,9 +92,6 @@ impl  P2PEngine {
                     gossipsub_config,
                 )?;
 
-                let mdns =
-                    mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
-
                 let ping_config = ping::Config::new()
                     .with_interval(std::time::Duration::from_secs(5)) // Пингуем каждые 15 сек
                     .with_timeout(std::time::Duration::from_secs(1));
@@ -132,9 +129,6 @@ impl  P2PEngine {
                     autonat_config,
                 );
 
-                // let relay_config = relay::Config::default();
-                // let relay = relay::Behaviour::new(key.public().to_peer_id(), relay_config);
-
                 let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
 
                 let upnp = upnp::tokio::Behaviour::default();
@@ -144,7 +138,6 @@ impl  P2PEngine {
                 Ok(MyBehaviour { 
                     upnp,
                     gossipsub, 
-                    mdns,
                     ping,
                     identify,
                     kademilia,
@@ -350,22 +343,6 @@ impl  P2PEngine {
                                         });
                                     }
                                     _ => {}
-                                }
-                            }
-                            MyBehaviourEvent::Mdns(mdns) => {
-                                match mdns {
-                                    mdns::Event::Discovered(list) => {
-                                        for (peer_id, _multiaddr) in list {
-                                            logln!(self, "mDNS discovered a new peer: {peer_id}");
-                                            swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                                        }
-                                    }
-                                    mdns::Event::Expired(list) => {
-                                        for (peer_id, _multiaddr) in list {
-                                            logln!(self, "mDNS discover peer has expired: {peer_id}");
-                                            swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                                        }
-                                    }
                                 }
                             }
                             MyBehaviourEvent::Upnp(upnp) => {
