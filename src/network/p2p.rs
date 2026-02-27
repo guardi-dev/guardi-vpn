@@ -253,11 +253,6 @@ impl  P2PEngine {
                         logln!(self, "❌ Local {}", local_addr);
                         logln!(self, "❌ Send back {}", send_back_addr);
                     }
-                    // SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                    //     if let Some(value) = peer_id {
-                    //         logln!(self, "❌ Outgoing connection error {} {}", value, error);
-                    //     }
-                    // }
                     SwarmEvent::ExternalAddrConfirmed { .. } => {
                         logln!(self, "📡 External Addr Confirmed");
                     }
@@ -285,13 +280,12 @@ impl  P2PEngine {
                                                             let _ = swarm.dial(dial);
                                                         }
                                                     },
-                                                    _ => {
-                                                        logln!(self, "🏁 Поиск завершен");
-                                                    }
+                                                    _ => {}
                                                 }
                                             }
                                             _ => {
-                                                logln!(self, "=== KAD PROGRESS: {:?} ===", result);
+                                                logln!(self, "=== KAD: {:?} ===", result);
+
                                             }
                                         }
                                     }
@@ -333,7 +327,7 @@ impl  P2PEngine {
                                 }
                             }
                             MyBehaviourEvent::Dcutr(event) => {
-                                logln!(self, "🛠️ DCUtR Event: {:?}", event);
+                                logln!(self, "🛠️ DCUtR: {:?}", event);
                             }
                             _ => {}
                         }
