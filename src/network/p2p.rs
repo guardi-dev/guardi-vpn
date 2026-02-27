@@ -191,10 +191,6 @@ impl  P2PEngine {
             addr.clone().with(Protocol::P2pCircuit)
         }).collect();
 
-        for addr in bootstraps.clone() {
-            swarm.listen_on(addr)?;
-        }
-
         let local_peer_id = *swarm.local_peer_id();
         logln!(self, "Swarm local peer id {}", local_peer_id.clone());
         // Kick it off
@@ -225,6 +221,32 @@ impl  P2PEngine {
                         let _ = swarm.behaviour_mut().kademilia.start_providing(topic_key.clone());
                         swarm.behaviour_mut().kademilia.get_providers(topic_key.clone());
                     }
+                }
+                _ = stats_timer.tick() => {
+                    let behaviour = swarm.behaviour_mut();
+                    let mut total_kad_peers = 0;
+                    for bucket in behaviour.kademilia.kbuckets() {
+                        total_kad_peers += bucket.num_entries();
+                    }
+
+                    let gossip_peers = behaviour.gossipsub.all_peers().count();
+                    let room_peers = behaviour.gossipsub.all_peers().filter(|(_,t)| t.contains(&&topic.hash())).count();
+                    let ext_addresses: Vec<&Multiaddr> = swarm.external_addresses().collect();
+                    let ext_addresses_count = ext_addresses.len();
+
+                    logln!(self, "Guardi VPN 📚:{} 🌐:{} 📡:{} 💬:{}", 
+                        total_kad_peers,
+                        gossip_peers,
+                        ext_addresses_count,
+                        room_peers
+                    );
+                    
+                    self.broadcast.on_stats(StatsMessage {
+                        room_count: room_peers.try_into().unwrap(),
+                        active_ralays_count: ext_addresses_count.try_into().unwrap(),
+                        gosibsub_count: gossip_peers.try_into().unwrap(),
+                        kademlia_count: total_kad_peers.try_into().unwrap()
+                    });
                 }
                 tx_event = tx.recv() => {
                     match tx_event {
@@ -370,37 +392,6 @@ impl  P2PEngine {
                         }
                     }
                     _ => {}
-                },
-                _ = stats_timer.tick() => {
-                    // clearscreen::clear().expect("failed to clear screen");
-
-                    let behaviour = swarm.behaviour_mut();
-
-                    // 1. Статистика Кадемлии (сколько пиров мы ЗНАЕМ)
-                    let mut total_kad_peers = 0;
-                    for bucket in behaviour.kademilia.kbuckets() {
-                        total_kad_peers += bucket.num_entries();
-                    }
-
-                    let gossip_peers = behaviour.gossipsub.all_peers().count();
-                    let room_peers = behaviour.gossipsub.all_peers().filter(|(_,t)| t.contains(&&topic.hash())).count();
-                    let ext_addresses: Vec<&Multiaddr> = swarm.external_addresses().collect();
-                    let ext_addresses_count = ext_addresses.len();
-
-                    logln!(self, "Guardi VPN 📚:{} 🌐:{} 📡:{} 💬:{}", 
-                        total_kad_peers,
-                        gossip_peers,
-                        ext_addresses_count,
-                        room_peers
-                    );
-                    
-                    // send stats to any other subscriber
-                    self.broadcast.on_stats(StatsMessage {
-                        room_count: room_peers.try_into().unwrap(),
-                        active_ralays_count: ext_addresses_count.try_into().unwrap(),
-                        gosibsub_count: gossip_peers.try_into().unwrap(),
-                        kademlia_count: total_kad_peers.try_into().unwrap()
-                    });
                 }
             }
         }
