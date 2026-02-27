@@ -4,7 +4,7 @@ use std::{
 
 use futures::stream::StreamExt;
 use libp2p::{
-    Multiaddr, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, multiaddr::Protocol, noise, ping, relay, swarm::{NetworkBehaviour, SwarmEvent, dial_opts::{DialOpts, PeerCondition}}, tcp, yamux
+    Multiaddr, StreamProtocol, autonat, dcutr, gossipsub, identify, kad::{self, RecordKey}, multiaddr::Protocol, noise, ping, relay, rendezvous, swarm::{NetworkBehaviour, SwarmEvent, dial_opts::{DialOpts, PeerCondition}}, tcp, yamux
 };
 use tokio::{io, select};
 use tracing_subscriber::{EnvFilter};
@@ -23,7 +23,8 @@ struct MyBehaviour {
     kademilia: kad::Behaviour<MemoryStore>,
     autonat: autonat::Behaviour,
     relay: relay::client::Behaviour,
-    dcutr: dcutr::Behaviour
+    dcutr: dcutr::Behaviour,
+    rzv: rendezvous::client::Behaviour
 }
 
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
@@ -125,6 +126,8 @@ impl  P2PEngine {
 
                 let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
 
+                let rzv = rendezvous::client::Behaviour::new(key.clone());
+
                 Ok(MyBehaviour { 
                     gossipsub, 
                     ping,
@@ -133,6 +136,7 @@ impl  P2PEngine {
                     autonat,
                     relay,
                     dcutr,
+                    rzv
                 })
             })?
             .build();
@@ -154,7 +158,6 @@ impl  P2PEngine {
 
         swarm.behaviour_mut()
             .kademilia.start_providing(topic_key.clone())?;
-
 
         // === LISTENERS ===
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
@@ -265,6 +268,17 @@ impl  P2PEngine {
                     }
                     SwarmEvent::Behaviour(my_behaviour) => {
                         match my_behaviour {
+                            MyBehaviourEvent::Rzv(rzv) => {
+                                match rzv {
+                                    rendezvous::client::Event::Registered { rendezvous_node, .. } => {
+                                        logln!(self, "📡 RZV Node Registered {:?}", rendezvous_node);
+                                    }
+                                    rendezvous::client::Event::Discovered { rendezvous_node, .. } => {
+                                        logln!(self, "📡 RZV Node Discovered {:?}", rendezvous_node);
+                                    }
+                                    _ => {}
+                                }
+                            }
                             MyBehaviourEvent::Kademilia(kad) => {
                                 match kad {
                                     kad::Event::OutboundQueryProgressed { result, .. } => {
@@ -275,13 +289,20 @@ impl  P2PEngine {
                                                         for peer_id in providers {
                                                             if peer_id == local_peer_id { continue; }
 
-                                                            logln!(self, "📍 Нашел провайдера: {peer_id}. Пробую Dial...");
-                                                            let dial = DialOpts::peer_id(peer_id)
-                                                                .condition(PeerCondition::Disconnected)
-                                                                .addresses(bootstraps.clone())
-                                                                .extend_addresses_through_behaviour()
-                                                                .build();
-                                                            let _ = swarm.dial(dial);
+                                                            logln!(self, "📍 Peer discovery: {peer_id}. Try Dial/RVZ...");
+                                                            // let dial = DialOpts::peer_id(peer_id)
+                                                            //     .condition(PeerCondition::Disconnected)
+                                                            //     .addresses(bootstraps.clone())
+                                                            //     .extend_addresses_through_behaviour()
+                                                            //     .build();
+                                                            // let _ = swarm.dial(dial);
+
+                                                            swarm.behaviour_mut().rzv.discover(
+                                                                Some(rendezvous::Namespace::new(TOPIC.to_string()).unwrap()),
+                                                                None,
+                                                                None,
+                                                                peer_id,
+                                                            );
                                                         }
                                                     },
                                                     _ => {}
