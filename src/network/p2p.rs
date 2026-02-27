@@ -62,10 +62,6 @@ impl  P2PEngine {
             )?
             .with_quic()
             .with_dns()?
-            // .with_websocket( // <-- Вот он, родной
-            //     noise::Config::new,
-            //     yamux::Config::default
-            // ).await.unwrap()
             .with_relay_client(noise::Config::new, yamux::Config::default)?
             .with_behaviour(|key, relay| {
                 // To content-address message, we can take the hash of message and use it as an ID.
@@ -166,11 +162,7 @@ impl  P2PEngine {
 
         // === LISTENERS ===
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
-        // swarm.listen_on("/ip4/0.0.0.0/tcp/0/ws".parse()?)?;
         swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
-
-        // swarm.behaviour_mut()
-            // .kademilia.start_providing(topic_key.clone()).unwrap();
 
         let bootstraps: Vec<Multiaddr> = vec![
             "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
@@ -184,13 +176,9 @@ impl  P2PEngine {
             addr.clone().with(Protocol::P2pCircuit)
         }).collect();
 
-        for boot in bootstraps.clone() {
-            swarm.listen_on(boot)?;
-        }
-
         let local_peer_id = *swarm.local_peer_id();
         logln!(self, "Swarm local peer id {}", local_peer_id.clone());
-        // Kick it off
+
         let mut stats_timer = tokio::time::interval(Duration::from_secs(3));
 
         let mut last_provisioning = tokio::time::interval(Duration::from_secs(30));
