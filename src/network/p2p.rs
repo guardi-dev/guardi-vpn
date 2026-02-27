@@ -198,14 +198,26 @@ impl  P2PEngine {
         let local_peer_id = *swarm.local_peer_id();
         logln!(self, "Swarm local peer id {}", local_peer_id.clone());
         // Kick it off
-        let mut stats_timer = tokio::time::interval(std::time::Duration::from_secs(3));
+        let mut stats_timer = tokio::time::interval(Duration::from_secs(3));
 
-        let mut last_provisioning = tokio::time::interval(std::time::Duration::from_secs(30));
+        let mut last_provisioning = tokio::time::interval(Duration::from_secs(30));
+
+        let mut reconnect = tokio::time::interval(Duration::from_mins(2));
 
         let mut tx = self.broadcast.subscribe();
 
         loop {
             select! {   
+                _ = reconnect.tick() => {
+                    let listen_addresses: Vec<Multiaddr> = swarm.listeners().cloned().collect();
+                    for boot in bootstraps.clone() {
+                        if listen_addresses.contains(&boot) {
+                            continue;
+                        }
+                        logln!(self, "📡 Reconnecting to relay {}", &boot);
+                        let _ = swarm.listen_on(boot.clone());
+                    }
+                }
                 _ = last_provisioning.tick() => {
                     let ext_count = swarm.external_addresses().count();
                     if ext_count > 0 {
